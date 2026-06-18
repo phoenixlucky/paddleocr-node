@@ -7,6 +7,22 @@
 
 ---
 
+## 🚀 一键启动
+
+本项目提供 `start.bat`（Windows）一键启动脚本，**无需手动安装依赖和编译**，双击即可运行 Web 服务：
+
+```bash
+# 只需双击 start.bat，它将自动：
+# 1. 检查 Node.js、npm、Python 环境
+# 2. 安装 npm 依赖（npm install）
+# 3. 编译 TypeScript（npm run build）
+# 4. 启动 Web 服务 → http://localhost:3100
+```
+
+> **用法：** 在项目根目录双击 `start.bat`，打开浏览器访问 `http://localhost:3100` 即可上传图片/PDF 进行识别。
+
+---
+
 ## 特性
 
 - ✅ **图片文字识别** — JPG / PNG / BMP / TIFF 等常见格式
