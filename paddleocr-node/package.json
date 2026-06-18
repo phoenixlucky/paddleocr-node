@@ -1,0 +1,62 @@
+{
+  "name": "paddleocr-node",
+  "version": "1.0.0",
+  "description": "Node.js 封装 PaddleOCR — 识别 PDF 和图片中的文字，支持中英文等多语言",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist/",
+    "python/",
+    "bin/",
+    "web/"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepare": "npm run build",
+    "postinstall": "node bin/install-python-deps.js",
+    "web": "node dist/web/server.js",
+    "web:dev": "node dist/web/server.js",
+    "test": "node dist/test.js",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "paddleocr",
+    "ocr",
+    "pdf-ocr",
+    "image-ocr",
+    "text-recognition",
+    "pdfplumber",
+    "table-extraction",
+    "chinese-ocr",
+    "baidu-ocr"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/multer": "^2.1.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/PaddlePaddle/PaddleOCR"
+  },
+  "bugs": {
+    "url": "https://github.com/PaddlePaddle/PaddleOCR/issues"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "multer": "^2.1.1"
+  }
+}

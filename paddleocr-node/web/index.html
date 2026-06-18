@@ -1,0 +1,1824 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PaddleOCR — 文字识别</title>
+<style>
+  /* ===== Reset & Base ===== */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { font-size: 15px; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    background: #f0f2f5;
+    color: #1a1a2e;
+    min-height: 100vh;
+  }
+
+  /* ===== Header ===== */
+  .header {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    color: #fff;
+    padding: 1.5rem 2rem;
+    text-align: center;
+    box-shadow: 0 2px 12px rgba(0,0,0,.15);
+  }
+  .header h1 { font-size: 1.6rem; font-weight: 700; letter-spacing: -.5px; }
+  .header h1 span { color: #4fc3f7; }
+  .header p { margin-top: .3rem; opacity: .75; font-size: .9rem; }
+
+  /* ===== Container ===== */
+  .container { max-width: 1440px; margin: 0 auto; padding: 1rem; }
+
+  /* ===== Top Toolbar ===== */
+  .top-toolbar {
+    display: flex; flex-wrap: nowrap; gap: .55rem; align-items: center;
+    background: #fff; border-radius: 12px; padding: .75rem .9rem;
+    box-shadow: 0 1px 6px rgba(0,0,0,.06); margin-bottom: .9rem;
+    overflow-x: auto;
+  }
+  .top-toolbar label {
+    flex: 0 0 auto; font-size: .82rem; font-weight: 600; color: #555;
+    display: flex; align-items: center; gap: .35rem; white-space: nowrap;
+  }
+  .top-toolbar .toggle-label input { width: 1rem; height: 1rem; cursor: pointer; }
+  .top-toolbar select {
+    padding: .4rem .7rem; border: 1px solid #d0d5dd; border-radius: 8px;
+    font-size: .85rem; background: #fff; cursor: pointer;
+    transition: border-color .2s;
+  }
+  .top-toolbar select:focus { outline: none; border-color: #0f3460; box-shadow: 0 0 0 3px rgba(15,52,96,.12); }
+  .top-toolbar .engine-status {
+    flex: 0 0 auto; margin-left: auto; font-size: .78rem; color: #999; white-space: nowrap;
+  }
+
+  /* ===== Upload Zone ===== */
+  .upload-zone {
+    background: #fff; border: 1px dashed #cbd5e1; border-radius: 10px;
+    padding: .48rem .7rem; cursor: pointer; transition: all .25s; margin-bottom: 0;
+    display: flex; align-items: center; justify-content: flex-start; gap: .5rem; text-align: left;
+    flex: 0 0 220px; min-width: 190px;
+  }
+  .upload-zone:hover, .upload-zone.dragover {
+    border-color: #0f3460; background: #f8faff;
+  }
+  .upload-zone .icon { font-size: 1.2rem; line-height: 1; }
+  .upload-zone .title { font-size: .86rem; font-weight: 600; color: #333; white-space: nowrap; }
+  .upload-zone .hint { display: none; }
+  .upload-zone .hint strong { color: #0f3460; }
+  .upload-zone .formats { display: none; }
+  .upload-zone input[type="file"] { display: none; }
+
+  /* ===== File Info ===== */
+  .file-info {
+    display: none; background: #fff; border-radius: 10px; padding: .55rem .75rem;
+    border: 1px solid #e4e7ec; margin-bottom: 0;
+    align-items: center; gap: .65rem; flex: 0 1 320px; min-width: 220px;
+  }
+  .file-info.show { display: flex; }
+  .file-info .preview {
+    width: 42px; height: 42px; border-radius: 8px; object-fit: cover;
+    background: #f0f2f5; flex-shrink: 0;
+  }
+  .file-info .detail { flex: 1; min-width: 0; }
+  .file-info .name { font-weight: 600; font-size: .88rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .file-info .meta { font-size: .74rem; color: #888; margin-top: .1rem; }
+  .file-info .change-btn {
+    font-size: .8rem; color: #0f3460; cursor: pointer; background: none;
+    border: 1px solid #0f3460; border-radius: 6px; padding: .25rem .55rem;
+    transition: all .2s; white-space: nowrap;
+  }
+  .file-info .change-btn:hover { background: #0f3460; color: #fff; }
+
+  .btn {
+    flex: 0 0 auto; display: inline-flex; align-items: center; gap: .4rem;
+    padding: .55rem 1rem; border: none; border-radius: 8px;
+    font-size: .9rem; font-weight: 600; cursor: pointer;
+    transition: all .2s; text-decoration: none;
+    white-space: nowrap;
+  }
+  .btn-primary { background: #0f3460; color: #fff; }
+  .btn-primary:hover { background: #1a4a7a; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(15,52,96,.25); }
+  .btn-primary:disabled { opacity: .5; cursor: not-allowed; transform: none; box-shadow: none; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; transform: none; box-shadow: none; }
+  .btn-secondary { background: #e8ecf1; color: #333; }
+  .btn-secondary:hover { background: #d5dce5; }
+  .btn-success { background: #0d9488; color: #fff; }
+  .btn-success:hover { background: #0f766e; }
+
+  /* ===== 更新日志 ===== */
+  .changelog-dialog {
+    width: min(520px, calc(100vw - 2rem)); max-height: min(680px, calc(100vh - 2rem));
+    margin: auto; padding: 0; border: 1px solid #dbe2ea; border-radius: 14px;
+    background: #fff; color: #1a1a2e; box-shadow: 0 24px 70px rgba(15, 23, 42, .28);
+    overflow: hidden;
+  }
+  .changelog-dialog::backdrop { background: rgba(15, 23, 42, .55); backdrop-filter: blur(2px); }
+  .changelog-header {
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    padding: 1rem 1.1rem; border-bottom: 1px solid #e4e7ec;
+    background: linear-gradient(135deg, #f8faff, #eef4ff);
+  }
+  .changelog-header h2 { font-size: 1.05rem; }
+  .changelog-close {
+    border: 1px solid #cfd7e3; border-radius: 7px; background: #fff; color: #344054;
+    padding: .35rem .65rem; font-size: .8rem; font-weight: 600; cursor: pointer;
+  }
+  .changelog-close:hover { border-color: #0f3460; color: #0f3460; }
+  .changelog-content { padding: 1.1rem; overflow-y: auto; max-height: calc(100vh - 8rem); }
+  .changelog-entry + .changelog-entry { margin-top: 1.15rem; padding-top: 1.15rem; border-top: 1px solid #e4e7ec; }
+  .changelog-meta { color: #0f3460; font-size: .78rem; font-weight: 700; letter-spacing: .02em; }
+  .changelog-entry h3 { margin-top: .25rem; font-size: .98rem; }
+  .changelog-entry ul { margin: .65rem 0 0 1.15rem; color: #475467; line-height: 1.65; font-size: .86rem; }
+
+  /* ===== Progress ===== */
+  .progress-bar {
+    display: none; background: #fff; border-radius: 12px; padding: 1.25rem;
+    box-shadow: 0 1px 6px rgba(0,0,0,.06); margin-bottom: 1.25rem;
+    text-align: center;
+  }
+  .progress-bar.show { display: block; }
+  .progress-bar .spinner {
+    display: inline-block; width: 32px; height: 32px;
+    border: 3px solid #e8ecf1; border-top-color: #0f3460;
+    border-radius: 50%; animation: spin .7s linear infinite;
+    margin-bottom: .5rem;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .progress-bar .status-text { font-size: .9rem; color: #555; }
+  .progress-bar .sub-text { font-size: .78rem; color: #999; margin-top: .25rem; }
+
+  /* ===== Results ===== */
+  .results { display: none; }
+  .results.show { display: block; }
+
+  .result-header {
+    background: #fff; border-radius: 10px; padding: .75rem 1rem;
+    box-shadow: 0 1px 6px rgba(0,0,0,.06); margin-bottom: .55rem;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 1rem;
+  }
+  .result-header .stat { font-size: .85rem; color: #666; }
+  .result-header .stat strong { color: #1a1a2e; }
+
+  .result-preview {
+    background: #fff; border-radius: 10px; padding: .75rem;
+    min-height: 620px; border: 1px solid #e4e7ec; overflow: hidden;
+  }
+  .source-preview {
+    width: 100%; height: 100%; min-height: 590px;
+    display: flex; align-items: center; justify-content: center;
+    background: #f8f9fb; border-radius: 8px; overflow: auto; color: #667085;
+    position: relative; cursor: grab; user-select: none;
+  }
+  .source-preview.grabbing { cursor: grabbing; }
+  .source-preview img {
+    max-width: 100%; max-height: 590px; object-fit: contain; border-radius: 6px;
+  }
+
+  /* ===== 缩放控制 ===== */
+  .zoom-controls {
+    position: absolute; top: 8px; right: 8px; z-index: 10;
+    display: flex; gap: 3px; align-items: center;
+    background: rgba(255,255,255,.9); border-radius: 8px;
+    padding: 3px 5px; border: 1px solid rgba(0,0,0,.1);
+    backdrop-filter: blur(4px);
+  }
+  .zoom-btn {
+    width: 26px; height: 26px; border: 1px solid #d0d5dd; border-radius: 6px;
+    background: #fff; color: #333; font-size: 14px; font-weight: 700;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: all .15s; line-height: 1;
+  }
+  .zoom-btn:hover { background: #0f3460; color: #fff; border-color: #0f3460; }
+  .zoom-btn[data-zoom="reset"] { font-size: 12px; }
+  .zoom-level {
+    font-size: .75rem; font-weight: 600; color: #333; min-width: 38px;
+    text-align: center; user-select: none;
+  }
+
+  /* ===== 识别模式（右面板） ===== */
+  .recognition-wrapper {
+    position: relative; display: flex; align-items: center; justify-content: center;
+    width: 100%; min-height: 400px;
+    background: #f8f9fb; border-radius: 8px; overflow: auto;
+    cursor: grab; user-select: none;
+  }
+  .recognition-wrapper.grabbing { cursor: grabbing; }
+  .recognition-stage {
+    position: relative; flex: 0 0 auto; display: inline-block; line-height: 0;
+  }
+  .recognition-wrapper img {
+    display: block; max-width: 100%; max-height: 590px; object-fit: contain;
+    border-radius: 6px;
+  }
+  .recognition-wrapper .rec-canvas {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    overflow: hidden; pointer-events: none;
+  }
+  .recognition-controls {
+    position: absolute; top: 8px; right: 8px; z-index: 20;
+    display: flex; gap: 3px; align-items: center;
+    background: rgba(255,255,255,.92); border-radius: 8px;
+    padding: 3px 5px; border: 1px solid rgba(0,0,0,.1);
+    backdrop-filter: blur(4px);
+  }
+  .rec-textbox {
+    position: absolute; font-size: 15px; line-height: 1.25;
+    color: #fff; font-weight: 600;
+    background: rgba(15,52,96,.75); border-radius: 3px;
+    padding: 2px 5px; overflow: hidden; text-overflow: ellipsis;
+    font-family: 'SF Mono', 'Consolas', monospace;
+    white-space: nowrap; pointer-events: auto;
+    transition: background .2s;
+    cursor: default; box-shadow: 0 1px 3px rgba(0,0,0,.15);
+  }
+  .rec-textbox:hover {
+    background: rgba(15,52,96,.95); z-index: 10; white-space: normal;
+    overflow: visible; text-overflow: clip;
+  }
+  .rec-table-overlay {
+    position: absolute; border: 3px solid #d97706; border-radius: 6px;
+    background: rgba(217,119,6,.1); pointer-events: auto;
+    font-size: 12px; color: #92400e; overflow: hidden;
+    cursor: default; box-shadow: 0 1px 4px rgba(0,0,0,.12);
+  }
+  .rec-table-overlay:hover { background: rgba(217,119,6,.25); z-index: 11; }
+  .rec-table-overlay .table-label {
+    position: absolute; top: 0; left: 0;
+    background: #d97706; color: #fff; font-size: 10px;
+    padding: 1px 6px; line-height: 18px; border-radius: 0 0 6px 0;
+    font-weight: 700;
+  }
+  .rec-table-overlay table {
+    width: 100%; height: calc(100% - 18px); margin-top: 18px;
+    border-collapse: collapse; font-size: 11px;
+  }
+  .rec-table-overlay table td,
+  .rec-table-overlay table th {
+    border: 1px solid rgba(217,119,6,.45); padding: 3px 5px;
+    text-align: left; vertical-align: top;
+    background: rgba(255,255,255,.85); color: #222;
+    max-width: 80px; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; font-weight: 500;
+  }
+  .rec-table-overlay table th {
+    background: rgba(217,119,6,.2); font-weight: 700; color: #5c2e00;
+  }
+
+  .result-content {
+    background: #fff; border-radius: 10px; padding: .65rem;
+    border: 1px solid #e4e7ec; min-width: 0; max-height: 620px; overflow: auto;
+  }
+  .result-workspace {
+    display: grid; grid-template-columns: minmax(360px, 42%) minmax(360px, 1fr);
+    gap: .9rem; align-items: start;
+  }
+  .parsed-block-title {
+    font-size: .82rem; font-weight: 700; color: #344054; margin-bottom: .28rem;
+  }
+
+  /* ===== View Mode Tabs ===== */
+  .view-tabs {
+    display: flex; gap: .35rem; margin-bottom: .4rem;
+  }
+  .view-tab {
+    padding: .35rem .75rem; border: 1px solid #d0d5dd; border-radius: 6px;
+    background: #fff; font-size: .8rem; cursor: pointer; transition: all .15s;
+    font-weight: 500; color: #555;
+  }
+  .view-tab.active { background: #0f3460; color: #fff; border-color: #0f3460; }
+  .view-tab:hover:not(.active) { border-color: #0f3460; color: #333; }
+  .view-panel { display: none; }
+  .view-panel.active { display: block; }
+
+
+  /* HTML 阅读面板 */
+  .markdown-output {
+    background: #f8f9fb; border-radius: 8px; padding: .55rem;
+    font-size: .86rem; line-height: 1.32;
+    border: 1px solid #e8ecf1; user-select: text;
+  }
+  .markdown-output h3 {
+    font-size: .95rem; margin: .2rem 0 .55rem; color: #1a1a2e;
+  }
+  .markdown-output pre {
+    margin: 0 0 .9rem; padding: .85rem; overflow: auto; border-radius: 8px;
+    background: #fff; border: 1px solid #e4e7ec;
+    font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+    font-size: .82rem; line-height: 1.45; white-space: pre;
+    tab-size: 4;
+  }
+  .markdown-output p { margin: 0; }
+  .markdown-output .ocr-table-card { margin-bottom: .5rem; }
+  .split-output { display: grid; gap: .5rem; }
+  .parsed-section-title {
+    display: flex; align-items: center; gap: .35rem;
+    margin: 0 0 .28rem; padding: 0 0 .25rem;
+    border-bottom: 1px solid #e4e7ec;
+    color: #344054; font-size: .78rem; font-weight: 700;
+  }
+  .plain-text-output { display: grid; gap: .08rem; }
+  .plain-text-line {
+    margin: 0; padding: 0; line-height: 1.28; color: #1f2937;
+    overflow-wrap: anywhere;
+  }
+
+  /* ===== 定位排版（按 OCR 坐标绝对定位） ===== */
+  .pos-layout {
+    position: relative; width: 100%;
+    overflow: hidden; background: #fff;
+    border-radius: 6px; border: 1px solid #e8ecf1;
+  }
+  .pos-item {
+    position: absolute; white-space: nowrap;
+    overflow: visible; line-height: 1.25;
+    padding: 0.04em 0.12em; color: #1a1a2e;
+  }
+  .pos-table-wrap {
+    position: absolute; overflow: auto;
+    background: rgba(255,255,255,.92);
+    border: 1px solid #d9e2ec; border-radius: 6px;
+  }
+  .pos-table-wrap .ocr-table-card { margin: 0; border: none; }
+  .pos-table-wrap .ocr-table-scroll { max-height: 180px; }
+  .pdf-layout-output {
+    display: grid; gap: .08rem; min-width: 680px;
+  }
+  .pdf-layout-row { min-height: 1.24rem; }
+  .pdf-layout-row.single {
+    padding: 0 .12rem; color: #344054; line-height: 1.28;
+    overflow-wrap: anywhere;
+  }
+  .pdf-layout-row.single.centered {
+    text-align: center; color: #1a1a2e; font-weight: 650;
+  }
+  .pdf-layout-row.multi {
+    display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
+    gap: .25rem; align-items: stretch;
+  }
+  .pdf-layout-row.kv {
+    display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
+    gap: .25rem; align-items: stretch;
+  }
+  .pdf-layout-cell {
+    min-width: 0; padding: .38rem .5rem; border: 1px solid #d9e2ec;
+    border-radius: 6px; background: #fff; color: #1f2937;
+    line-height: 1.35; white-space: nowrap;
+  }
+  .pdf-layout-kv {
+    display: inline-flex; gap: .45rem; align-items: baseline;
+    min-width: max-content; white-space: nowrap; padding: .38rem .5rem;
+    border: 1px solid #d9e2ec; border-radius: 6px; background: #fff;
+    color: #1f2937; line-height: 1.35;
+  }
+  .pdf-layout-kv .label {
+    color: #475467; font-weight: 700;
+  }
+  .pdf-layout-kv .value {
+    color: #111827; font-weight: 600;
+  }
+  .pdf-layout-row.is-heading .pdf-layout-cell {
+    background: #eef4ff; border-color: #c7d7fe; color: #1a1a2e;
+    font-weight: 700;
+  }
+  .pdf-layout-gap { display: none; }
+  .pdf-item-table-wrap {
+    overflow: auto; margin: .35rem 0 .55rem; border: 1px solid #d9e2ec;
+    border-radius: 8px; background: #fff;
+  }
+  .pdf-item-table {
+    width: auto; min-width: 100%; border-collapse: collapse; font-size: .84rem;
+  }
+  .pdf-item-table th,
+  .pdf-item-table td {
+    border: 1px solid #e4e7ec; padding: .55rem .65rem; text-align: left;
+    vertical-align: top; line-height: 1.35; white-space: nowrap;
+  }
+  .pdf-item-table th { background: #eef4ff; color: #1a1a2e; font-weight: 700; }
+  .pdf-item-table td:nth-child(4),
+  .pdf-item-table td:nth-child(5),
+  .pdf-item-table th:nth-child(4),
+  .pdf-item-table th:nth-child(5) { text-align: right; white-space: nowrap; }
+
+  /* 文本框面板 */
+  .box-table-wrap { max-height: 500px; overflow-y: auto; }
+  .box-table {
+    width: 100%; border-collapse: collapse; font-size: .82rem;
+  }
+  .box-table th {
+    background: #f8f9fb; padding: .55rem .7rem; text-align: left;
+    font-weight: 600; color: #555; border-bottom: 2px solid #e8ecf1;
+    position: sticky; top: 0; z-index: 1;
+  }
+  .box-table td {
+    padding: .5rem .7rem; border-bottom: 1px solid #f0f2f5;
+    vertical-align: top;
+  }
+  .box-table tr:hover td { background: #fafbff; }
+  .box-table .score-bar {
+    display: inline-block; height: 6px; border-radius: 3px;
+    background: #e8ecf1; width: 60px; vertical-align: middle; margin-right: .4rem;
+  }
+  .box-table .score-bar-fill { height: 100%; border-radius: 3px; background: #0f3460; }
+  .box-table .cell-text { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* 表格识别面板 */
+  .table-output { display: grid; gap: .5rem; }
+  .table-empty {
+    padding: .45rem .55rem; border: 1px dashed #d0d5dd; border-radius: 8px;
+    background: #fff; color: #667085; text-align: left; font-size: .82rem;
+  }
+  .ocr-table-card {
+    border: 1px solid #e4e7ec; border-radius: 8px; overflow: hidden;
+    background: #fff;
+  }
+  .ocr-table-head {
+    display: flex; flex-wrap: wrap; align-items: center; gap: .6rem;
+    padding: .4rem .55rem; background: #f8f9fb; border-bottom: 1px solid #e4e7ec;
+    font-size: .78rem; color: #667085;
+  }
+  .ocr-table-head strong { color: #1a1a2e; }
+  .ocr-table-scroll { overflow: auto; max-height: 420px; }
+  .ocr-table {
+    width: auto; min-width: 100%; border-collapse: collapse; font-size: .84rem;
+  }
+  .ocr-table th, .ocr-table td {
+    border: 1px solid #e4e7ec; padding: .38rem 1.9rem .38rem .5rem; text-align: left;
+    vertical-align: top; white-space: nowrap;
+    position: relative;
+  }
+  .ocr-table th { background: #eef4ff; color: #1a1a2e; font-weight: 700; }
+  .ocr-table tr:nth-child(even) td { background: #fbfcfe; }
+  .ocr-table tr:hover td { background: #f5faff; }
+  .ocr-table .cell-value { user-select: text; white-space: nowrap; }
+  .ocr-table .cell-copy-btn {
+    position: absolute; top: .35rem; right: .35rem;
+    width: 1.45rem; height: 1.45rem; border: 1px solid #cfd7e3; border-radius: 6px;
+    background: #fff; color: #475467; cursor: pointer; font-size: .78rem; line-height: 1;
+    display: inline-flex; align-items: center; justify-content: center;
+    opacity: 0; transition: opacity .15s, background .15s, border-color .15s, color .15s;
+  }
+  .ocr-table th:hover .cell-copy-btn,
+  .ocr-table td:hover .cell-copy-btn,
+  .ocr-table .cell-copy-btn:focus {
+    opacity: 1;
+  }
+  .ocr-table .cell-copy-btn:hover {
+    background: #0f3460; border-color: #0f3460; color: #fff;
+  }
+  .ocr-table .cell-copy-btn.copied {
+    opacity: 1; background: #0d9488; border-color: #0d9488; color: #fff;
+  }
+
+  /* 页面选择器 */
+  .page-selector {
+    display: flex; gap: .4rem; flex-wrap: wrap; margin-bottom: .6rem;
+  }
+  .page-selector button {
+    padding: .35rem .7rem; border: 1px solid #d0d5dd; border-radius: 6px;
+    background: #fff; font-size: .8rem; cursor: pointer; transition: all .15s;
+  }
+  .page-selector button.active { background: #0f3460; color: #fff; border-color: #0f3460; }
+  .page-selector button:hover:not(.active) { border-color: #0f3460; }
+
+  /* ===== Footer ===== */
+  .footer { text-align: center; padding: 1.5rem; font-size: .78rem; color: #999; }
+
+  /* ===== Responsive ===== */
+  @media (max-width: 640px) {
+    .header { padding: 1rem; }
+    .header h1 { font-size: 1.25rem; }
+    .container { padding: .75rem; }
+    .top-toolbar { padding: .65rem; }
+    .upload-zone { flex-basis: 190px; }
+    .result-header { flex-direction: column; align-items: stretch; }
+    .result-workspace { grid-template-columns: 1fr; }
+    .result-preview { min-height: 380px; }
+    .source-preview { min-height: 350px; }
+    .source-preview img { max-height: 350px; }
+    .result-content { max-height: none; }
+    .box-table td, .box-table th { padding: .4rem .5rem; font-size: .78rem; }
+    .box-table .cell-text { max-width: 120px; }
+    .ocr-table { min-width: 100%; font-size: .78rem; }
+    .ocr-table th, .ocr-table td { padding: .5rem 1.9rem .5rem .55rem; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ===== Header ===== -->
+<header class="header">
+  <h1>📄 <span>WEI</span> 文字识别系统</h1>
+  <p>基于深度学习本地引擎</p>
+</header>
+
+<div class="container">
+
+  <!-- ===== 顶部工具栏 ===== -->
+  <div class="top-toolbar">
+    <label>🌐 语言
+      <select id="lang">
+        <option value="ch">中文简体</option>
+        <option value="en">English</option>
+        <option value="chinese_cht">中文繁体</option>
+        <option value="japan">日本語</option>
+        <option value="korean">한국어</option>
+        <option value="latin">Latin</option>
+        <option value="arabic">العربية</option>
+        <option value="cyrillic">Кириллица</option>
+        <option value="devanagari">देवनागरी</option>
+      </select>
+    </label>
+    <label>⚡ 模型
+      <select id="ocrVersion">
+        <option value="PP-OCRv6">PP-OCRv6 (推荐)</option>
+        <option value="PP-OCRv5">PP-OCRv5</option>
+        <option value="PP-OCRv4">PP-OCRv4 (更快)</option>
+      </select>
+    </label>
+    <label class="toggle-label">📊 表格
+      <input type="checkbox" id="enableTable">
+    </label>
+
+    <div class="upload-zone" id="uploadZone" role="button" tabindex="0">
+      <div class="icon">📁</div>
+      <div class="title">上传文件</div>
+      <div class="hint">支持 <strong>JPG</strong> / <strong>PNG</strong> / <strong>BMP</strong> / <strong>TIFF</strong> / <strong>PDF</strong></div>
+      <div class="formats">单个文件最大 100MB</div>
+      <input type="file" id="fileInput" accept="image/*,.pdf">
+    </div>
+
+    <div class="file-info" id="fileInfo">
+      <img class="preview" id="filePreview" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Ctext x='50%25' y='50%25' text-anchor='middle' dominant-baseline='central' font-size='28'%3E🖼️%3C/text%3E%3C/svg%3E">
+      <div class="detail">
+        <div class="name" id="fileName">-</div>
+        <div class="meta" id="fileMeta">-</div>
+      </div>
+      <button class="change-btn" id="changeFileBtn">更换文件</button>
+    </div>
+
+    <button class="btn btn-primary" id="startBtn">🚀 开始识别</button>
+    <button class="btn btn-secondary" id="copyBtn" disabled>📋 复制全文</button>
+    <button class="btn btn-success" id="downloadBtn" disabled>📥 下载文本</button>
+    <button class="btn btn-secondary" id="changelogBtn" type="button" aria-haspopup="dialog">更新日志</button>
+    <label class="engine-status" id="engineStatus">⏳ 引擎未初始化</label>
+  </div>
+
+  <!-- ===== 进度条 ===== -->
+  <div class="progress-bar" id="progressBar">
+    <div class="spinner"></div>
+    <div class="status-text" id="progressText">正在识别中...</div>
+    <div class="sub-text" id="progressSub">首次运行会下载 OCR 模型，请耐心等待</div>
+  </div>
+
+  <!-- ===== 结果区域 ===== -->
+  <div class="results" id="results">
+    <div class="result-header">
+      <span class="stat">📊 共 <strong id="rPages">0</strong> 页 · <strong id="rTables">0</strong> 个表格 · <strong id="rChars">0</strong> 字符 · 耗时 <strong id="rTime">-</strong></span>
+    </div>
+
+    <!-- 多页选择 -->
+    <div class="page-selector" id="pageSelector"></div>
+
+    <div class="result-workspace">
+      <div class="result-preview" id="resultPreview">
+        <div class="source-preview" id="sourcePreview">
+          （等待原文件预览）
+          <!-- 缩放控制 -->
+          <div class="zoom-controls" id="zoomControls" style="display:none">
+            <button class="zoom-btn" data-zoom="-">−</button>
+            <span class="zoom-level" id="zoomLevel">120%</span>
+            <button class="zoom-btn" data-zoom="+">+</button>
+            <button class="zoom-btn" data-zoom="reset">↺</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="result-content">
+        <div class="view-tabs">
+          <button class="view-tab active" data-view="markdown">📝 HTML 阅读</button>
+          <button class="view-tab" data-view="layout">🏛️ 识别模式</button>
+        </div>
+
+        <div class="view-panel active" id="panelMarkdown">
+          <div class="parsed-block-title">HTML 解析结果</div>
+          <div class="markdown-output split-output" id="markdownOutput">
+            <section>
+              <div class="parsed-section-title">非表格解析</div>
+              <div id="textOutput">（等待识别结果）</div>
+            </section>
+            <section>
+              <div class="parsed-section-title">表格解析</div>
+              <div class="table-output" id="tableOutput">（等待识别结果）</div>
+            </section>
+          </div>
+        </div>
+
+        <div class="view-panel" id="panelLayout">
+          <div class="parsed-block-title">识别模式（在原图上高亮识别结果）</div>
+          <div id="layoutContainer" style="position:relative;"><p style="color:#999;padding:.5rem;">（等待识别结果）</p></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<footer class="footer">
+  PaddleOCR Web v1.0 · 基于 <a href="https://github.com/PaddlePaddle/PaddleOCR" target="_blank">PaddleOCR</a> 和 Node.js
+</footer>
+
+<dialog class="changelog-dialog" id="changelogDialog" aria-labelledby="changelogTitle">
+  <div class="changelog-header">
+    <h2 id="changelogTitle">更新日志</h2>
+    <button class="changelog-close" id="changelogCloseBtn" type="button">关闭</button>
+  </div>
+  <div class="changelog-content">
+    <article class="changelog-entry">
+      <div class="changelog-meta">2026-06-18 · 最新</div>
+      <h3>PaddleOCR 3.7 支持</h3>
+      <ul>
+        <li>默认使用 PP-OCRv6 medium 模型。</li>
+        <li>支持 tiny、small、medium 三档检测与识别模型。</li>
+        <li>适配 PaddleOCR 3.7 的新结果数据结构。</li>
+        <li>安装时自动检测并升级旧版 PaddleOCR。</li>
+        <li>新增推理引擎、文档方向和图像矫正配置。</li>
+      </ul>
+    </article>
+    <article class="changelog-entry">
+      <div class="changelog-meta">初始版本</div>
+      <h3>本地 OCR Web 界面</h3>
+      <ul>
+        <li>支持图片与 PDF 文字识别。</li>
+        <li>支持逐页预览、表格提取、复制和下载结果。</li>
+      </ul>
+    </article>
+  </div>
+</dialog>
+
+<script>
+// ================================================================
+//  JavaScript
+// ================================================================
+
+(function() {
+  'use strict';
+
+  // ─── DOM ────────────────────────────────────────────
+  const $ = (sel) => document.querySelector(sel);
+  const uploadZone = $('#uploadZone');
+  const fileInput = $('#fileInput');
+  const fileInfo = $('#fileInfo');
+  const filePreview = $('#filePreview');
+  const fileName = $('#fileName');
+  const fileMeta = $('#fileMeta');
+  const changeFileBtn = $('#changeFileBtn');
+  const startBtn = $('#startBtn');
+  const progressBar = $('#progressBar');
+  const progressText = $('#progressText');
+  const progressSub = $('#progressSub');
+  const results = $('#results');
+  const rPages = $('#rPages');
+  const rTables = $('#rTables');
+  const rChars = $('#rChars');
+  const rTime = $('#rTime');
+  const pageSelector = $('#pageSelector');
+  const markdownOutput = $('#markdownOutput');
+  const textOutput = $('#textOutput');
+  const tableOutput = $('#tableOutput');
+  const copyBtn = $('#copyBtn');
+  const downloadBtn = $('#downloadBtn');
+  const changelogBtn = $('#changelogBtn');
+  const changelogDialog = $('#changelogDialog');
+  const changelogCloseBtn = $('#changelogCloseBtn');
+  const engineStatus = $('#engineStatus');
+  const sourcePreview = $('#sourcePreview');
+
+  setResultActionsEnabled(false);
+
+  // ─── 状态 ────────────────────────────────────────────
+  let currentFile = null;     // File 对象
+  let resultData = null;      // 最近一次识别结果
+  let currentPage = 1;        // 当前查看的页码
+  let previewDataUrl = null;  // 原图 data URL（供大图预览使用）
+  let previewObjectUrl = null; // 原文件 object URL（供 PDF/图片预览使用）
+
+  const API_BASE = window.location.protocol === 'file:' ? 'http://localhost:3100' : '';
+  const apiUrl = (path) => `${API_BASE}${path}`;
+
+  // ─── 更新日志 ──────────────────────────────────────
+  changelogBtn.addEventListener('click', () => changelogDialog.showModal());
+  changelogCloseBtn.addEventListener('click', () => changelogDialog.close());
+  changelogDialog.addEventListener('click', (event) => {
+    if (event.target === changelogDialog) changelogDialog.close();
+  });
+
+  // ─── 上传区域 ──────────────────────────────────────
+  uploadZone.addEventListener('click', () => fileInput.click());
+  uploadZone.addEventListener('dragover', (e) => { e.preventDefault(); uploadZone.classList.add('dragover'); });
+  uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+  uploadZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    uploadZone.classList.remove('dragover');
+    if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]);
+  });
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files.length > 0) handleFile(fileInput.files[0]);
+  });
+  changeFileBtn.addEventListener('click', () => fileInput.click());
+
+  // ─── 文件处理 ──────────────────────────────────────
+  function handleFile(file) {
+    const maxSize = 100 * 1024 * 1024;
+    if (file.size > maxSize) {
+      alert(`文件过大（最大 100MB）：${(file.size / 1024 / 1024).toFixed(1)}MB`);
+      return;
+    }
+    currentFile = file;
+    if (previewObjectUrl) {
+      URL.revokeObjectURL(previewObjectUrl);
+    }
+    previewObjectUrl = URL.createObjectURL(file);
+
+    // 显示文件信息
+    fileInfo.classList.add('show');
+    fileName.textContent = file.name;
+    const sizeStr = file.size < 1024 ? `${file.size} B`
+      : file.size < 1024*1024 ? `${(file.size/1024).toFixed(1)} KB`
+      : `${(file.size/1024/1024).toFixed(1)} MB`;
+    fileMeta.textContent = sizeStr;
+
+    // 预览
+    if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
+      filePreview.className = 'preview';
+      filePreview.src = 'data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2764%27 height=%2764%27%3E%3Ctext x=%2750%25%27 y=%2750%25%27 text-anchor=%27middle%27 dominant-baseline=%27central%27 font-size=%2728%27%3E📕%3C/text%3E%3C/svg%3E';
+      previewDataUrl = previewObjectUrl;
+    } else if (file.type.startsWith('image/')) {
+      filePreview.className = 'preview';
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const url = e.target.result;
+        filePreview.src = url;
+        previewDataUrl = url;  // 存下来给大图预览用
+      };
+      reader.readAsDataURL(file);
+    } else {
+      filePreview.className = 'preview';
+      filePreview.src = 'data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2764%27 height=%2764%27%3E%3Ctext x=%2750%25%27 y=%2750%25%27 text-anchor=%27middle%27 dominant-baseline=%27central%27 font-size=%2728%27%3E🖼️%3C/text%3E%3C/svg%3E';
+      previewDataUrl = previewObjectUrl;
+    }
+
+    // 重置结果
+    resultData = null;
+    results.classList.remove('show');
+    progressBar.classList.remove('show');
+    startBtn.disabled = false;
+    setResultActionsEnabled(false);
+  }
+
+  // ─── 开始识别 ──────────────────────────────────────
+  startBtn.addEventListener('click', async () => {
+    if (!currentFile) { alert('请先选择文件'); return; }
+
+    progressBar.classList.add('show');
+    progressText.textContent = '正在识别中...';
+    progressSub.textContent = '首次运行会下载 OCR 模型（约 100-200MB），请耐心等待';
+    startBtn.disabled = true;
+    results.classList.remove('show');
+    setResultActionsEnabled(false);
+
+    const formData = new FormData();
+    formData.append('file', currentFile);
+
+    const lang = $('#lang').value;
+    const ocrVersion = $('#ocrVersion').value;
+    const enableTable = $('#enableTable').checked ? '1' : '0';
+    const startTime = Date.now();
+
+    try {
+      const resp = await fetch(apiUrl(`/api/ocr?lang=${encodeURIComponent(lang)}&ocrVersion=${encodeURIComponent(ocrVersion)}&enableTable=${enableTable}`), {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await resp.json();
+
+      if (!data.success) {
+        throw new Error(data.error || '识别失败');
+      }
+
+      resultData = data;
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+      // 关闭表格识别时从前端剥离表格数据
+      if (enableTable === '0' && data.pages) {
+        for (const p of data.pages) { p.tables = []; }
+        data.totalTables = 0;
+      }
+
+      // 显示结果
+      rPages.textContent = data.totalPages;
+      rTables.textContent = data.totalTables || 0;
+      rChars.textContent = data.fullText.length;
+      rTime.textContent = `${elapsed}s`;
+
+      currentPage = 1;
+      renderPage(currentPage);
+      renderPageSelector(data.pages);
+      results.classList.add('show');
+      setResultActionsEnabled(true);
+      progressText.textContent = '✅ 识别完成';
+      progressSub.textContent = `完成！耗时 ${elapsed}s`;
+      progressBar.classList.remove('show');  // 隐藏进度条，停止转圈
+    } catch (err) {
+      progressText.textContent = `❌ 识别失败`;
+      progressSub.textContent = err.message || '未知错误';
+      console.error(err);
+    } finally {
+      startBtn.disabled = false;
+    }
+  });
+
+  // ─── 渲染页面 ──────────────────────────────────────
+  // ─── 缩放 ──────────────────────────────────────────────
+  let zoomLevel = 1.2;
+  let recognitionZoomLevel = 1.2;
+  let currentRecognitionPage = null;
+  const ZOOM_MIN = 0.3;
+  const ZOOM_MAX = 5.0;
+  const ZOOM_STEP = 0.25;
+
+  function applyZoom() {
+    const img = sourcePreview.querySelector('img');
+    const zoomLabel = document.getElementById('zoomLevel');
+    if (!img || !zoomLabel) return;
+    const pct = Math.round(zoomLevel * 100);
+    zoomLabel.textContent = pct + '%';
+    if (zoomLevel === 1.0) {
+      img.style.width = '';
+      img.style.maxWidth = '100%';
+      img.style.maxHeight = '590px';
+      img.style.height = '';
+      sourcePreview.style.justifyContent = 'center';
+      sourcePreview.style.alignItems = 'center';
+    } else {
+      img.style.width = (img.naturalWidth * zoomLevel) + 'px';
+      img.style.maxWidth = 'none';
+      img.style.maxHeight = 'none';
+      img.style.height = 'auto';
+      // 放大后左上对齐，便于拖拽
+      sourcePreview.style.justifyContent = 'flex-start';
+      sourcePreview.style.alignItems = 'flex-start';
+    }
+  }
+
+  // ─── 渲染 ──────────────────────────────────────────────
+
+  function renderPage(pageNum) {
+    if (!resultData || !resultData.pages || resultData.pages.length === 0) {
+      textOutput.textContent = '（无识别结果）';
+      tableOutput.textContent = '（无表格结果）';
+      return;
+    }
+
+    const page = resultData.pages.find(p => p.page === pageNum) || resultData.pages[0];
+    if (!page) return;
+
+    currentPage = page.page;
+
+    renderReadingOrder(page);
+
+    renderSourcePreview(page);
+    renderRecognitionMode(page);
+  }
+
+  function renderSourcePreview(page) {
+    sourcePreview.innerHTML = '';
+    if (!currentFile || !previewObjectUrl) {
+      sourcePreview.textContent = '（无原文件预览）';
+      return;
+    }
+
+    // 缩放控制（先加入，后面 img onload 时显示）
+    const zoomControls = document.createElement('div');
+    zoomControls.className = 'zoom-controls';
+    zoomControls.id = 'zoomControls';
+    zoomControls.style.display = 'none';
+    zoomControls.innerHTML = `
+      <button class="zoom-btn" data-zoom="-">−</button>
+      <span class="zoom-level" id="zoomLevel">120%</span>
+      <button class="zoom-btn" data-zoom="+">+</button>
+      <button class="zoom-btn" data-zoom="reset">↺</button>
+    `;
+    sourcePreview.appendChild(zoomControls);
+
+    if (currentFile.type === 'application/pdf' || /\.pdf$/i.test(currentFile.name)) {
+      if (page?.previewImage) {
+        const img = document.createElement('img');
+        img.alt = `PDF 第 ${currentPage} 页预览`;
+        img.src = page.previewImage;
+        img.onload = () => {
+          zoomControls.style.display = 'flex';
+          applyZoom();
+        };
+        sourcePreview.appendChild(img);
+      } else if (previewObjectUrl) {
+        const embed = document.createElement('embed');
+        embed.src = previewObjectUrl + '#page=' + currentPage + '&toolbar=1&navpanes=1';
+        embed.type = 'application/pdf';
+        embed.style.cssText = 'width:100%;height:590px;border:none;border-radius:6px;';
+        sourcePreview.appendChild(embed);
+      } else {
+        sourcePreview.textContent = `第 ${currentPage} 页预览不可用`;
+      }
+      return;
+    }
+
+    if (currentFile.type.startsWith('image/')) {
+      const img = document.createElement('img');
+      img.alt = '原图预览';
+      img.src = previewDataUrl || previewObjectUrl;
+      img.onload = () => {
+        zoomControls.style.display = 'flex';
+        applyZoom();
+      };
+      sourcePreview.appendChild(img);
+      return;
+    }
+
+    sourcePreview.textContent = currentFile.name;
+  }
+
+  function renderPositionedHtml(page) {
+    // 收集所有元素及其坐标（与识别模式使用相同的数据源）
+    const items = [];
+    const boxes = (page.boxes || []).filter(b => b.text.trim());
+
+    for (const b of boxes) {
+      const xs = b.box.map(p => p[0]);
+      const ys = b.box.map(p => p[1]);
+      items.push({
+        type: 'text',
+        x1: Math.min(...xs), x2: Math.max(...xs),
+        y1: Math.min(...ys), y2: Math.max(...ys),
+        text: b.text.trim(),
+      });
+    }
+    const tables = (page.tables || []).filter(t => t.rows && t.rows.length > 0);
+    for (const t of tables) {
+      items.push({ type: 'table', data: t, bbox: t.bbox || null });
+    }
+
+    if (!items.length) {
+      markdownOutput.innerHTML = '<p>（当前页未识别到内容）</p>';
+      return;
+    }
+
+    // 计算完整坐标空间（与 inferCoordinateSpace 逻辑一致）
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const item of items) {
+      if (item.type === 'text') {
+        minX = Math.min(minX, item.x1); maxX = Math.max(maxX, item.x2);
+        minY = Math.min(minY, item.y1); maxY = Math.max(maxY, item.y2);
+      } else if (item.bbox) {
+        minX = Math.min(minX, item.bbox[0], item.bbox[2]);
+        maxX = Math.max(maxX, item.bbox[0], item.bbox[2]);
+        minY = Math.min(minY, item.bbox[1], item.bbox[3]);
+        maxY = Math.max(maxY, item.bbox[1], item.bbox[3]);
+      }
+    }
+    const pageW = maxX - minX || 1;
+    const pageH = maxY - minY || 1;
+
+    // 按 Y 排序（从上到下），同 Y 内按 X 排序（从左到右）
+    items.sort((a, b) => {
+      const ay = a.type === 'text' ? a.y1 : (a.bbox ? a.bbox[1] : 0);
+      const by = b.type === 'text' ? b.y1 : (b.bbox ? b.bbox[1] : 0);
+      if (Math.abs(ay - by) > 5) return ay - by;
+      const ax = a.type === 'text' ? a.x1 : (a.bbox ? a.bbox[0] : 0);
+      const bx = b.type === 'text' ? b.x1 : (b.bbox ? b.bbox[0] : 0);
+      return ax - bx;
+    });
+
+    // 生成绝对定位 HTML
+    const parts = items.map(item => {
+      if (item.type === 'text') {
+        const left = ((item.x1 - minX) / pageW * 100).toFixed(2);
+        const top = ((item.y1 - minY) / pageH * 100).toFixed(2);
+        const boxH = item.y2 - item.y1;
+        // 字号按框高度适配（同识别模式: Math.max(10, Math.min(18, h * 0.7))）
+        const fontSize = Math.max(9, Math.min(16, Math.round(boxH * 0.7)));
+        return `<span class="pos-item" style="left:${left}%;top:${top}%;font-size:${fontSize}px">${escapeHtml(item.text)}</span>`;
+      }
+      // 表格：在 bbox 位置渲染
+      if (item.type === 'table') {
+        const left = item.bbox ? ((item.bbox[0] - minX) / pageW * 100).toFixed(2) : '0';
+        const top = item.bbox ? ((item.bbox[1] - minY) / pageH * 100).toFixed(2) : '0';
+        const w = item.bbox ? ((item.bbox[2] - item.bbox[0]) / pageW * 100).toFixed(2) : '100';
+        return `<div class="pos-table-wrap" style="left:${left}%;top:${top}%;width:${w}%">${renderOcrTableHtml(item.data)}</div>`;
+      }
+      return '';
+    }).join('');
+
+    // 设置容器宽高比（匹配页面原始比例，加一点安全边距）
+    const aspectRatio = Math.max(0.3, Math.min(3, pageW / pageH));
+    markdownOutput.innerHTML = `<div class="pos-layout" style="aspect-ratio:${aspectRatio.toFixed(4)}">${parts}</div>`;
+  }
+
+  function isPdfFile() {
+    return !!currentFile && (currentFile.type === 'application/pdf' || /\.pdf$/i.test(currentFile.name));
+  }
+
+  function hasPreservedLayoutText(page) {
+    const text = String(page?.fullText || '');
+    return isPdfFile() && text.trim() && / {2,}|\t/.test(text);
+  }
+
+  function getNativeTables(page) {
+    return (page?.tables || []).filter(t => Array.isArray(t.rows) && t.rows.length > 0);
+  }
+
+  function tableHasUsableBbox(table) {
+    if (!Array.isArray(table?.bbox) || table.bbox.length < 4) return false;
+    const [x1, y1, x2, y2] = table.bbox.map(Number);
+    return [x1, y1, x2, y2].every(Number.isFinite) && Math.abs(x2 - x1) > 1 && Math.abs(y2 - y1) > 1;
+  }
+
+  function isBoxInsideAnyTable(box, tables) {
+    const bounds = getBoxBounds(box.box);
+    if (!bounds) return false;
+    const cx = (bounds.x1 + bounds.x2) / 2;
+    const cy = (bounds.y1 + bounds.y2) / 2;
+    return tables.some((table) => {
+      if (!tableHasUsableBbox(table)) return false;
+      const [x1, y1, x2, y2] = table.bbox.map(Number);
+      const left = Math.min(x1, x2);
+      const right = Math.max(x1, x2);
+      const top = Math.min(y1, y2);
+      const bottom = Math.max(y1, y2);
+      return cx >= left && cx <= right && cy >= top && cy <= bottom;
+    });
+  }
+
+  function medianNumber(values, fallback) {
+    const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+    if (!sorted.length) return fallback;
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+
+  function buildCompactTextLines(page) {
+    if (hasPreservedLayoutText(page)) {
+      const itemTable = buildItemTableFromBoxes(page);
+      return String(page?.fullText || '')
+        .replace(/\s+$/g, '')
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(line => line && !(itemTable && isItemTableTextLine(line)));
+    }
+
+    const nativeTables = getNativeTables(page);
+    const items = (page?.boxes || [])
+      .filter(box => String(box.text || '').trim())
+      .filter(box => !isBoxInsideAnyTable(box, nativeTables))
+      .map((box) => {
+        const bounds = getBoxBounds(box.box);
+        if (!bounds) return null;
+        return {
+          text: String(box.text || '').trim(),
+          x: (bounds.x1 + bounds.x2) / 2,
+          y: (bounds.y1 + bounds.y2) / 2,
+          height: Math.max(1, bounds.y2 - bounds.y1),
+        };
+      })
+      .filter(Boolean);
+
+    if (!items.length) return [];
+    const threshold = Math.max(8, medianNumber(items.map(item => item.height), 12) * 0.72);
+    const rows = [];
+    for (const item of items.sort((a, b) => a.y - b.y || a.x - b.x)) {
+      let row = rows.find(candidate => Math.abs(candidate.y - item.y) <= threshold);
+      if (!row) {
+        row = { y: item.y, items: [] };
+        rows.push(row);
+      }
+      row.items.push(item);
+      row.y = row.items.reduce((sum, value) => sum + value.y, 0) / row.items.length;
+    }
+
+    return rows
+      .sort((a, b) => a.y - b.y)
+      .map(row => row.items.sort((a, b) => a.x - b.x).map(item => item.text).join(' ').replace(/\s+/g, ' ').trim())
+      .filter(Boolean);
+  }
+
+  function renderPlainTextOutput(page) {
+    const lines = buildCompactTextLines(page);
+    if (!lines.length) {
+      textOutput.innerHTML = '<p class="table-empty">当前页未识别到非表格文本</p>';
+      return;
+    }
+    textOutput.innerHTML = `<div class="plain-text-output">${
+      lines.map(line => `<p class="plain-text-line">${escapeHtml(line)}</p>`).join('')
+    }</div>`;
+  }
+
+  function collectPageTables(page) {
+    const tables = getNativeTables(page).slice();
+    const itemTable = buildItemTableFromBoxes(page);
+    if (itemTable) {
+      tables.push({
+        rows: [itemTable.headers, ...itemTable.rows],
+        rowCount: itemTable.rows.length + 1,
+        columnCount: itemTable.headers.length,
+      });
+    }
+    return tables;
+  }
+
+  function renderTableOutput(page) {
+    const tables = collectPageTables(page);
+    if (!tables.length) {
+      tableOutput.innerHTML = '<p class="table-empty">当前页未识别到表格</p>';
+      return;
+    }
+    tableOutput.innerHTML = tables
+      .map((table, index) => renderOcrTableHtml(table, `表格 ${index + 1}`))
+      .join('');
+  }
+
+  function renderReadingOrder(page) {
+    renderPlainTextOutput(page);
+    renderTableOutput(page);
+  }
+
+  function splitLayoutLine(line) {
+    const segments = [];
+    const pattern = /\S(?:.*?\S)?(?= {2,}|$)/g;
+    let match;
+    while ((match = pattern.exec(line)) !== null) {
+      segments.push({
+        start: match.index,
+        text: match[0].trim(),
+      });
+    }
+    return segments;
+  }
+
+  function isInlineKeyValue(segments) {
+    return segments.length === 2
+      && /:\s*$/.test(segments[0].text)
+      && !/:/.test(segments[1].text)
+      && segments[1].text.length <= 36;
+  }
+
+  function renderInlineKeyValue(segments, maxChars) {
+    const [label, value] = segments;
+    const start = Math.max(0, Math.min(maxChars - 1, label.start));
+    const end = Math.max(start + 8, Math.min(maxChars, value.start + value.text.length + 2));
+    return `<div class="pdf-layout-row kv" style="--cols:${maxChars}">
+      <span class="pdf-layout-kv" style="grid-column:${start + 1} / ${end + 1}">
+        <span class="label">${escapeHtml(label.text)}</span>
+        <span class="value">${escapeHtml(value.text)}</span>
+      </span>
+    </div>`;
+  }
+
+  function buildPdfWordRows(page) {
+    const rows = [];
+    (page.boxes || []).forEach((box) => {
+      const text = String(box.text || '').trim();
+      const bounds = getBoxBounds(box.box);
+      if (!text || !bounds) return;
+      const item = {
+        text,
+        x1: bounds.x1,
+        x2: bounds.x2,
+        y1: bounds.y1,
+        y2: bounds.y2,
+        xc: (bounds.x1 + bounds.x2) / 2,
+        yc: (bounds.y1 + bounds.y2) / 2,
+      };
+      let row = rows.find((candidate) => Math.abs(candidate.yc - item.yc) <= 5);
+      if (!row) {
+        row = { yc: item.yc, items: [] };
+        rows.push(row);
+      }
+      row.items.push(item);
+      row.yc = row.items.reduce((sum, value) => sum + value.yc, 0) / row.items.length;
+    });
+    rows.forEach((row) => {
+      row.items.sort((a, b) => a.x1 - b.x1);
+      row.text = row.items.map((item) => item.text).join(' ');
+    });
+    rows.sort((a, b) => a.yc - b.yc);
+    return rows;
+  }
+
+  function buildItemTableFromBoxes(page) {
+    const rows = buildPdfWordRows(page);
+    const headerIndex = rows.findIndex((row) =>
+      /Item\s+#\s+Item\s+Description/i.test(row.text) && /Model\s+#/i.test(row.text) && /Qty\./i.test(row.text)
+    );
+    if (headerIndex < 0) return null;
+
+    const header = rows[headerIndex];
+    const itemStarts = header.items
+      .map((item, index) => ({ ...item, index }))
+      .filter((item) => /^Item$/i.test(item.text));
+    const model = header.items.find((item) => /^Model$/i.test(item.text));
+    const qty = header.items.filter((item) => /^Qty\.$/i.test(item.text));
+    if (itemStarts.length < 2 || !model || qty.length < 2) return null;
+
+    const anchors = [itemStarts[0].x1, itemStarts[1].x1, model.x1, qty[0].x1, qty[1].x1];
+    const boundaries = anchors.slice(0, -1).map((x, index) => (x + anchors[index + 1]) / 2);
+    const headers = ['Item #', 'Item Description', 'Model #', 'Qty. Ordered', 'Qty. Shipped'];
+    const tableRows = [];
+
+    for (let index = headerIndex + 1; index < rows.length; index++) {
+      const row = rows[index];
+      if (row.yc - header.yc > 85) break;
+      if (/^Ordered\s+Shipped$/i.test(row.text)) continue;
+      if (!/^\d{4,}\b/.test(row.text)) continue;
+
+      const cells = headers.map(() => []);
+      row.items.forEach((item) => {
+        const col = boundaries.findIndex((boundary) => item.xc < boundary);
+        cells[col === -1 ? headers.length - 1 : col].push(item);
+      });
+      tableRows.push(cells.map((cell) => cell.map((item) => item.text).join(' ').trim()));
+    }
+
+    if (!tableRows.length) return null;
+    return { headers, rows: tableRows };
+  }
+
+  function isItemTableTextLine(line) {
+    return /Qty\./.test(line)
+      || /Item\s+#\s+Item\s+Description/i.test(line)
+      || /Ordered\s+Shipped/i.test(line)
+      || /^\s*\d{4,}\s+/.test(line);
+  }
+
+  function renderPdfItemTable(table) {
+    const head = table.headers.map((cell) => `<th>${escapeHtml(cell)}</th>`).join('');
+    const body = table.rows.map((row) =>
+      `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`
+    ).join('');
+    return `<div class="pdf-item-table-wrap">
+      <table class="pdf-item-table">
+        <thead><tr>${head}</tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>`;
+  }
+
+  function renderStructuredPdfPage(page) {
+    const rawLines = String(page?.fullText || '').replace(/\s+$/g, '').split(/\r?\n/);
+    const lines = rawLines.filter((line, index, arr) => {
+      const prevHasText = arr.slice(0, index).some((item) => item.trim());
+      const nextHasText = arr.slice(index + 1).some((item) => item.trim());
+      return line.trim() || (prevHasText && nextHasText);
+    });
+    const maxChars = Math.max(24, Math.min(96, ...lines.map((line) => line.length)));
+    const itemTable = buildItemTableFromBoxes(page);
+    let itemTableRendered = false;
+    const html = lines.map((line) => {
+      if (itemTable && isItemTableTextLine(line)) {
+        if (itemTableRendered) return '';
+        itemTableRendered = true;
+        return renderPdfItemTable(itemTable);
+      }
+      if (!line.trim()) return '<div class="pdf-layout-gap"></div>';
+
+      const segments = splitLayoutLine(line);
+      if (segments.length <= 1) {
+        const text = (segments[0]?.text || line.trim());
+        const start = segments[0]?.start ?? line.search(/\S/);
+        const centered = start > maxChars * 0.22 && (start + text.length) < maxChars * 0.86;
+        return `<div class="pdf-layout-row single${centered ? ' centered' : ''}">${escapeHtml(text)}</div>`;
+      }
+      if (isInlineKeyValue(segments)) {
+        return renderInlineKeyValue(segments, maxChars);
+      }
+
+      const isHeading = segments.some((segment) =>
+        /:$/.test(segment.text) || /^(Item #|Qty\.|Ordered|Shipped|Model #)/i.test(segment.text)
+      );
+      const cells = segments.map((segment) => {
+        const start = Math.max(0, Math.min(maxChars - 1, segment.start));
+        const span = Math.max(5, Math.min(maxChars - start, segment.text.length + 2));
+        return `<span class="pdf-layout-cell" style="grid-column:${start + 1} / span ${span}">${escapeHtml(segment.text)}</span>`;
+      }).join('');
+      return `<div class="pdf-layout-row multi${isHeading ? ' is-heading' : ''}" style="--cols:${maxChars}">${cells}</div>`;
+    }).join('');
+
+    markdownOutput.innerHTML = `<div class="pdf-layout-output">${html || '<div class="pdf-layout-row single">（当前页未识别到内容）</div>'}</div>`;
+  }
+
+  function getBoxBounds(points) {
+    const valid = (points || []).filter((p) => Array.isArray(p) && p.length >= 2);
+    if (!valid.length) return null;
+    const xs = valid.map((p) => Number(p[0])).filter(Number.isFinite);
+    const ys = valid.map((p) => Number(p[1])).filter(Number.isFinite);
+    if (!xs.length || !ys.length) return null;
+    return {
+      x1: Math.min(...xs),
+      y1: Math.min(...ys),
+      x2: Math.max(...xs),
+      y2: Math.max(...ys),
+    };
+  }
+
+  function inferCoordinateSpace(page, naturalWidth, naturalHeight) {
+    const bounds = [];
+    (page.boxes || []).forEach((box) => {
+      const bound = getBoxBounds(box.box);
+      if (bound) bounds.push(bound);
+    });
+    (page.tables || []).forEach((table) => {
+      if (Array.isArray(table.bbox) && table.bbox.length >= 4) {
+        const [x1, y1, x2, y2] = table.bbox.map(Number);
+        if ([x1, y1, x2, y2].every(Number.isFinite)) bounds.push({ x1, y1, x2, y2 });
+      }
+    });
+
+    const maxX = Math.max(0, ...bounds.map((bound) => bound.x2));
+    const maxY = Math.max(0, ...bounds.map((bound) => bound.y2));
+    if (isPdfFile() && maxX && maxY && (naturalWidth / maxX > 1.25 || naturalHeight / maxY > 1.25)) {
+      const pdfPreviewScale = 120 / 72;
+      return { width: naturalWidth / pdfPreviewScale, height: naturalHeight / pdfPreviewScale };
+    }
+    return { width: naturalWidth, height: naturalHeight };
+  }
+
+  function drawRecognitionOverlays(page, img, canvas, stage) {
+    canvas.innerHTML = '';
+    const natW = img.naturalWidth;
+    const natH = img.naturalHeight;
+    if (!natW || !natH) return;
+
+    const imgRect = img.getBoundingClientRect();
+    const stageRect = stage.getBoundingClientRect();
+    const coordSpace = inferCoordinateSpace(page, natW, natH);
+    const ox = imgRect.left - stageRect.left;
+    const oy = imgRect.top - stageRect.top;
+    const scaleX = imgRect.width / coordSpace.width;
+    const scaleY = imgRect.height / coordSpace.height;
+
+    const boxes = (page.boxes || []).filter(b => b.text.trim());
+    for (const b of boxes) {
+      const bounds = getBoxBounds(b.box);
+      if (!bounds) continue;
+      const x1 = bounds.x1 * scaleX + ox;
+      const y1 = bounds.y1 * scaleY + oy;
+      const w = Math.max(6, (bounds.x2 - bounds.x1) * scaleX);
+      const h = Math.max(14, (bounds.y2 - bounds.y1) * scaleY);
+
+      const el = document.createElement('div');
+      el.className = 'rec-textbox';
+      el.style.left = x1 + 'px';
+      el.style.top = y1 + 'px';
+      el.style.width = w + 'px';
+      el.style.height = h + 'px';
+      el.style.fontSize = Math.max(10, Math.min(18, h * 0.7)) + 'px';
+      el.textContent = b.text;
+      el.title = b.text;
+      canvas.appendChild(el);
+    }
+
+    const tables = (page.tables || []).filter(t => t.bbox && t.rows && t.rows.length > 0);
+    for (const t of tables) {
+      const [tx1, ty1, tx2, ty2] = t.bbox;
+      const x1 = tx1 * scaleX + ox;
+      const y1 = ty1 * scaleY + oy;
+      const w = Math.max(30, (tx2 - tx1) * scaleX);
+      const h = Math.max(30, (ty2 - ty1) * scaleY);
+
+      const el = document.createElement('div');
+      el.className = 'rec-table-overlay';
+      el.style.left = x1 + 'px';
+      el.style.top = y1 + 'px';
+      el.style.width = w + 'px';
+      el.style.height = h + 'px';
+
+      const label = document.createElement('div');
+      label.className = 'table-label';
+      label.textContent = `📊 ${t.rowCount}×${t.columnCount}`;
+      el.appendChild(label);
+
+      const tableEl = document.createElement('table');
+      if (t.rows.length > 0) {
+        const thead = document.createElement('thead');
+        const tr = document.createElement('tr');
+        for (const cell of t.rows[0]) {
+          const th = document.createElement('th');
+          th.textContent = cell || '';
+          tr.appendChild(th);
+        }
+        thead.appendChild(tr);
+        tableEl.appendChild(thead);
+      }
+      if (t.rows.length > 1) {
+        const tbody = document.createElement('tbody');
+        for (let i = 1; i < t.rows.length; i++) {
+          const tr = document.createElement('tr');
+          for (const cell of t.rows[i]) {
+            const td = document.createElement('td');
+            td.textContent = cell || '';
+            tr.appendChild(td);
+          }
+          tbody.appendChild(tr);
+        }
+        tableEl.appendChild(tbody);
+      }
+      el.appendChild(tableEl);
+      el.title = `表格 ${t.rowCount}行×${t.columnCount}列`;
+      canvas.appendChild(el);
+    }
+  }
+
+  function applyRecognitionZoom(redraw = true) {
+    const wrapper = document.querySelector('#layoutContainer .recognition-wrapper');
+    const img = wrapper?.querySelector('img');
+    const canvas = wrapper?.querySelector('.rec-canvas');
+    const stage = wrapper?.querySelector('.recognition-stage');
+    const zoomLabel = document.getElementById('recognitionZoomLevel');
+    if (!wrapper || !img || !canvas || !stage || !zoomLabel) return;
+
+    zoomLabel.textContent = Math.round(recognitionZoomLevel * 100) + '%';
+    if (recognitionZoomLevel === 1.0) {
+      img.style.width = '';
+      img.style.maxWidth = '100%';
+      img.style.maxHeight = '590px';
+      img.style.height = '';
+      wrapper.style.justifyContent = 'center';
+      wrapper.style.alignItems = 'center';
+    } else {
+      img.style.width = (img.naturalWidth * recognitionZoomLevel) + 'px';
+      img.style.maxWidth = 'none';
+      img.style.maxHeight = 'none';
+      img.style.height = 'auto';
+      wrapper.style.justifyContent = 'flex-start';
+      wrapper.style.alignItems = 'flex-start';
+    }
+
+    if (redraw && currentRecognitionPage && img.complete) {
+      requestAnimationFrame(() => drawRecognitionOverlays(currentRecognitionPage, img, canvas, stage));
+    }
+  }
+
+  /**
+   * 在原始预览图上叠加识别结果，并支持缩放和平移查看。
+   */
+  function renderRecognitionMode(page) {
+    const container = document.getElementById('layoutContainer');
+    container.innerHTML = '';
+    currentRecognitionPage = page;
+    recognitionZoomLevel = 1.2;
+
+    let imgSrc = null;
+    if (currentFile && currentFile.type.startsWith('image/')) {
+      imgSrc = previewDataUrl || previewObjectUrl;
+    } else if (page?.previewImage) {
+      imgSrc = page.previewImage;
+    } else if (previewObjectUrl) {
+      imgSrc = previewObjectUrl;
+    }
+    if (!imgSrc) {
+      container.innerHTML = '<p style="color:#999;padding:.5rem;">（无图片预览）</p>';
+      return;
+    }
+
+    const controls = document.createElement('div');
+    controls.className = 'recognition-controls';
+    controls.innerHTML = `
+      <button class="zoom-btn" data-rec-zoom="-">−</button>
+      <span class="zoom-level" id="recognitionZoomLevel">120%</span>
+      <button class="zoom-btn" data-rec-zoom="+">+</button>
+      <button class="zoom-btn" data-rec-zoom="reset">↺</button>
+    `;
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'recognition-wrapper';
+
+    const stage = document.createElement('div');
+    stage.className = 'recognition-stage';
+
+    const img = document.createElement('img');
+    img.alt = '识别模式';
+
+    const canvas = document.createElement('div');
+    canvas.className = 'rec-canvas';
+    img.onload = () => {
+      applyRecognitionZoom(false);
+      requestAnimationFrame(() => drawRecognitionOverlays(page, img, canvas, stage));
+    };
+    img.src = imgSrc;
+    stage.appendChild(img);
+    stage.appendChild(canvas);
+    wrapper.appendChild(stage);
+
+    container.appendChild(controls);
+    container.appendChild(wrapper);
+  }
+
+  function renderOcrTableHtml(table, title = '') {
+    const rows = normalizeTableRows(table?.rows || []);
+    if (!rows.length) return '';
+    const head = rows[0] || [];
+    const body = rows.slice(1);
+    const headerHtml = head.map(cell => renderCopyableCell(cell, 'th')).join('');
+    const bodyHtml = body.map(row =>
+      `<tr>${row.map(cell => renderCopyableCell(cell, 'td')).join('')}</tr>`
+    ).join('');
+    const rowCount = table?.rowCount || rows.length;
+    const columnCount = table?.columnCount || head.length;
+    return `<section class="ocr-table-card">
+      ${title ? `<div class="ocr-table-head"><strong>${escapeHtml(title)}</strong><span>${rowCount} 行 × ${columnCount} 列</span></div>` : ''}
+      <div class="ocr-table-scroll">
+        <table class="ocr-table">
+          <thead><tr>${headerHtml}</tr></thead>
+          <tbody>${bodyHtml}</tbody>
+        </table>
+      </div>
+    </section>`;
+  }
+
+  function tableToMarkdown(rows) {
+    const normalized = normalizeTableRows(rows || []);
+    if (!normalized.length) return '';
+    const escapeCell = (value) => String(value == null ? '' : value).replace(/\|/g, '\\|').replace(/\n/g, ' ').trim();
+    const colCount = normalized[0].length;
+    const lines = [
+      `| ${normalized[0].map(escapeCell).join(' | ')} |`,
+      `| ${Array.from({ length: colCount }, () => '---').join(' | ')} |`,
+    ];
+    normalized.slice(1).forEach(row => {
+      lines.push(`| ${row.map(escapeCell).join(' | ')} |`);
+    });
+    return lines.join('\n');
+  }
+
+  function renderCopyableCell(value, tagName) {
+    const cellText = value == null ? '' : String(value);
+    return `<${tagName}>
+      <span class="cell-value">${escapeHtml(cellText)}</span>
+      <button class="cell-copy-btn" type="button" title="复制单元格" aria-label="复制单元格">⧉</button>
+    </${tagName}>`;
+  }
+
+  function normalizeTableRows(rows) {
+    const colCount = rows.reduce((max, row) => Math.max(max, Array.isArray(row) ? row.length : 0), 0);
+    return rows.map(row => {
+      const cells = Array.isArray(row) ? row.map(cell => cell == null ? '' : String(cell)) : [];
+      while (cells.length < colCount) cells.push('');
+      return cells;
+    });
+  }
+
+  function renderPageSelector(pages) {
+    if (!pages || pages.length <= 1) {
+      pageSelector.innerHTML = '';
+      return;
+    }
+    pageSelector.innerHTML = pages.map(p =>
+      `<button class="${p.page === currentPage ? 'active' : ''}" data-page="${p.page}">第 ${p.page} 页</button>`
+    ).join('');
+
+    pageSelector.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        pageSelector.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        renderPage(parseInt(btn.dataset.page));
+      });
+    });
+  }
+
+  markdownOutput.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.cell-copy-btn');
+    if (!btn) return;
+    const cell = btn.closest('th,td');
+    const value = cell?.querySelector('.cell-value')?.textContent || '';
+    try {
+      await copyText(value);
+      showCopiedState(btn);
+    } catch {
+      alert('复制失败，请手动选择单元格文本复制');
+    }
+  });
+
+  // ─── 视图切换 ──────────────────────────────────────
+  document.querySelectorAll('.view-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      // Update tab state
+      document.querySelectorAll('.view-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      // Show corresponding panel
+      const view = tab.dataset.view;
+      document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
+      const panel = document.getElementById('panel' + view.charAt(0).toUpperCase() + view.slice(1));
+      if (panel) panel.classList.add('active');
+      // Re-render if we have data
+      if (resultData && currentPage) {
+        const page = resultData.pages.find(p => p.page === currentPage) || resultData.pages[0];
+        if (!page) return;
+        if (view === 'layout') {
+          renderRecognitionMode(page);
+        } else {
+          renderReadingOrder(page);
+        }
+      }
+    });
+  });
+
+  // ─── 缩放事件 ──────────────────────────────────────
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.zoom-btn');
+    if (!btn) return;
+    const recAction = btn.dataset.recZoom;
+    if (recAction) {
+      if (recAction === '+') {
+        recognitionZoomLevel = Math.min(ZOOM_MAX, recognitionZoomLevel + ZOOM_STEP);
+      } else if (recAction === '-') {
+        recognitionZoomLevel = Math.max(ZOOM_MIN, recognitionZoomLevel - ZOOM_STEP);
+      } else if (recAction === 'reset') {
+        recognitionZoomLevel = 1.2;
+      }
+      applyRecognitionZoom();
+      return;
+    }
+    const action = btn.dataset.zoom;
+    if (!action) return;
+    if (action === '+') {
+      zoomLevel = Math.min(ZOOM_MAX, zoomLevel + ZOOM_STEP);
+    } else if (action === '-') {
+      zoomLevel = Math.max(ZOOM_MIN, zoomLevel - ZOOM_STEP);
+    } else if (action === 'reset') {
+      zoomLevel = 1.2;
+    }
+    applyZoom();
+  });
+
+  // ─── 拖拽平移（缩放后） ────────────────────────────
+  (function() {
+    let isDown = false, startX, startY, sLeft, sTop;
+    sourcePreview.addEventListener('mousedown', (e) => {
+      if (zoomLevel <= 1.0) return;
+      isDown = true;
+      sourcePreview.classList.add('grabbing');
+      startX = e.pageX - sourcePreview.offsetLeft;
+      startY = e.pageY - sourcePreview.offsetTop;
+      sLeft = sourcePreview.scrollLeft;
+      sTop = sourcePreview.scrollTop;
+    });
+    document.addEventListener('mousemove', (e) => {
+      if (!isDown) return;
+      e.preventDefault();
+      const x = e.pageX - sourcePreview.offsetLeft;
+      const y = e.pageY - sourcePreview.offsetTop;
+      sourcePreview.scrollLeft = sLeft - (x - startX);
+      sourcePreview.scrollTop = sTop - (y - startY);
+    });
+    document.addEventListener('mouseup', () => {
+      isDown = false;
+      sourcePreview.classList.remove('grabbing');
+    });
+    // 鼠标离开预览区也取消拖拽
+    sourcePreview.addEventListener('mouseleave', () => {
+      isDown = false;
+      sourcePreview.classList.remove('grabbing');
+    });
+  })();
+
+  // ─── 识别模式拖拽平移 ──────────────────────────────
+  (function() {
+    let isDown = false, startX, startY, sLeft, sTop, activeWrapper = null;
+    document.addEventListener('mousedown', (e) => {
+      const wrapper = e.target.closest('#layoutContainer .recognition-wrapper');
+      if (!wrapper || recognitionZoomLevel <= 1.0) return;
+      isDown = true;
+      activeWrapper = wrapper;
+      wrapper.classList.add('grabbing');
+      startX = e.pageX - wrapper.offsetLeft;
+      startY = e.pageY - wrapper.offsetTop;
+      sLeft = wrapper.scrollLeft;
+      sTop = wrapper.scrollTop;
+    });
+    document.addEventListener('mousemove', (e) => {
+      if (!isDown || !activeWrapper) return;
+      e.preventDefault();
+      const x = e.pageX - activeWrapper.offsetLeft;
+      const y = e.pageY - activeWrapper.offsetTop;
+      activeWrapper.scrollLeft = sLeft - (x - startX);
+      activeWrapper.scrollTop = sTop - (y - startY);
+    });
+    document.addEventListener('mouseup', () => {
+      isDown = false;
+      if (activeWrapper) activeWrapper.classList.remove('grabbing');
+      activeWrapper = null;
+    });
+  })();
+
+  // ─── 复制 & 下载 ──────────────────────────────────
+  copyBtn.addEventListener('click', async () => {
+    if (!resultData) return;
+    try {
+      await copyText(buildExportText());
+      const orig = copyBtn.textContent;
+      copyBtn.textContent = '✅ 已复制';
+      setTimeout(() => { copyBtn.textContent = orig; }, 2000);
+    } catch {
+      alert('复制失败，请手动选择文本复制');
+    }
+  });
+
+  downloadBtn.addEventListener('click', () => {
+    if (!resultData) return;
+    const blob = new Blob([buildExportText()], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const baseName = (currentFile ? currentFile.name : 'ocr-result').replace(/\.[^.]+$/, '');
+    a.href = url;
+    a.download = `${baseName}_ocr.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  function buildExportText() {
+    if (!resultData) return '';
+    const parts = [];
+    for (const page of resultData.pages || []) {
+      if ((resultData.pages || []).length > 1) {
+        parts.push(`--- 第 ${page.page} 页 ---`);
+      }
+      const textLines = buildCompactTextLines(page);
+      if (textLines.length) {
+        parts.push(textLines.join('\n'));
+      }
+      for (const table of collectPageTables(page)) {
+        const md = table.markdown || tableToMarkdown(table.rows || []);
+        if (md.trim()) parts.push(md.trim());
+      }
+    }
+    return parts.map(part => String(part).trim()).filter(Boolean).join('\n').trim() || resultData.fullText || '';
+  }
+
+  async function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.select();
+    const copied = document.execCommand('copy');
+    textarea.remove();
+    if (!copied) throw new Error('copy failed');
+  }
+
+  function setResultActionsEnabled(enabled) {
+    copyBtn.disabled = !enabled;
+    downloadBtn.disabled = !enabled;
+  }
+
+  function showCopiedState(btn) {
+    const original = btn.textContent;
+    btn.classList.add('copied');
+    btn.textContent = '✓';
+    setTimeout(() => {
+      btn.classList.remove('copied');
+      btn.textContent = original;
+    }, 1200);
+  }
+
+  // ─── 引擎状态 ──────────────────────────────────────
+  async function checkStatus() {
+    try {
+      const resp = await fetch(apiUrl('/api/status'));
+      const data = await resp.json();
+      engineStatus.textContent = data.engineBusy ? '⏳ 正在识别...' : '✅ 服务已连接';
+      engineStatus.style.color = data.engineBusy ? '#f59e0b' : '#0d9488';
+    } catch {
+      engineStatus.textContent = '❌ 连接失败';
+      engineStatus.style.color = '#ef4444';
+    }
+  }
+  checkStatus();
+  setInterval(checkStatus, 10000);
+
+  // ─── 工具 ──────────────────────────────────────────
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+})();
+</script>
+</body>
+</html>

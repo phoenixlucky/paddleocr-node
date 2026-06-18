@@ -1,0 +1,24 @@
+# 工具目录
+.codegraph/
+.reasonix/
+
+# Node.js
+node_modules/
+dist/
+*.log
+
+# 上传文件
+paddleocr-node/uploads/
+paddleocr-node/server.*.log
+
+# Python
+__pycache__/
+*.pyc
+.python-version
+.paddleocr/
+paddlex_pipelines/
+**/*.egg-info/
+
+# 系统文件
+.DS_Store
+Thumbs.db

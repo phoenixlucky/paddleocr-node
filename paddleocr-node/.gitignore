@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.pyc
+__pycache__/
+.python-version
+.paddleocr/
+paddlex_pipelines/
+**/*.egg-info/
+.env
