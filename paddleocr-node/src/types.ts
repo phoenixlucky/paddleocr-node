@@ -16,7 +16,7 @@ export interface PaddleOcrOptions {
 
   /**
    * OCR 模型版本，默认 "PP-OCRv6"
-   * 可选: "PP-OCRv3" | "PP-OCRv4" | "PP-OCRv5" | "PP-OCRv6"
+   * 可选: "PP-OCRv3" | "PP-OCRv4" | "PP-OCRv5" | "PP-OCRv6" | "Unlimited-OCR"
    */
   ocrVersion?: string;
 

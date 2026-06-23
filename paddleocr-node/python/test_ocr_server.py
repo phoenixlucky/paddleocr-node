@@ -40,6 +40,11 @@ class PaddleOcr37ResultTests(unittest.TestCase):
             "score": 0.9,
         }])
 
+    def test_unlimited_ocr_init_is_lazy(self):
+        engine = OcrEngine({"ocrVersion": "Unlimited-OCR"})
+        self.assertTrue(engine._is_unlimited_ocr())
+        self.assertIsNone(engine._unlimited_model)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -37,6 +37,11 @@ function decodeProcessLog(data: Buffer): string {
   }
 }
 
+const DATA_ROOT = process.env.PADDLEOCR_DATA_ROOT || (process.platform === 'win32' ? 'D:\\paddleocr_data' : path.join(require('os').homedir(), 'paddleocr_data'));
+const PADDLEOCR_HOME = DATA_ROOT;
+const HUGGINGFACE_HUB = path.join(DATA_ROOT, 'huggingface', 'hub');
+const CONDA_META_PATH = path.join(DATA_ROOT, 'python-path.json');
+
 export class PaddleOcr {
   private _proc: ChildProcess | null = null;
   private _pending = new Map<number, PendingRequest>();
@@ -172,6 +177,8 @@ export class PaddleOcr {
     if (this._ready) return;
 
     const pythonCmd = await this._findPython();
+    fs.mkdirSync(PADDLEOCR_HOME, { recursive: true });
+    fs.mkdirSync(HUGGINGFACE_HUB, { recursive: true });
 
     const scriptPath = this._options.serverScriptPath
       ? this._options.serverScriptPath
@@ -197,6 +204,10 @@ export class PaddleOcr {
           stdio: ['pipe', 'pipe', 'pipe'],
           env: {
             ...process.env,
+            PADDLEOCR_DATA_ROOT: DATA_ROOT,
+            PADDLEOCR_HOME,
+            HF_HOME: path.join(DATA_ROOT, 'huggingface'),
+            HUGGINGFACE_HUB_CACHE: HUGGINGFACE_HUB,
             PYTHONUNBUFFERED: '1',
             // 强制 Python 使用 UTF-8 输出，防止含中文/特殊字符时 GBK 编码崩溃
             PYTHONIOENCODING: 'utf-8',
@@ -340,11 +351,19 @@ export class PaddleOcr {
       return { cmd: this._options.pythonPath, version: 'custom' };
     }
 
-    // (A) 尝试从 Conda 环境元数据读取
+    // (A) 优先使用 D:\paddleocr_data 下的 Conda 环境
+    const dataRootPython = process.platform === 'win32'
+      ? path.join(DATA_ROOT, 'conda-env', 'python.exe')
+      : path.join(DATA_ROOT, 'conda-env', 'bin', 'python');
+    if (fs.existsSync(dataRootPython)) {
+      return { cmd: dataRootPython, version: 'data-root' };
+    }
+
+    // (B) 尝试从 Conda 环境元数据读取
     const condaPy = this._findCondaPython();
     if (condaPy) return condaPy;
 
-    // (B) 扫描 PATH
+    // (C) 扫描 PATH
     const candidates = process.platform === 'win32'
       ? ['python', 'python3', 'py']
       : ['python3', 'python'];
@@ -373,19 +392,14 @@ export class PaddleOcr {
   }
 
   /**
-   * 读取 ~/.paddleocr/python-path.json，验证并返回 Conda 环境的 Python 路径
+   * 读取 D:\paddleocr_data\python-path.json，验证并返回 Conda 环境的 Python 路径
    */
   private _findCondaPython(): PythonInfo | null {
     try {
       const { execSync } = require('child_process');
-      const metaPath = require('path').join(
-        require('os').homedir(),
-        '.paddleocr',
-        'python-path.json'
-      );
-      if (!require('fs').existsSync(metaPath)) return null;
+      if (!require('fs').existsSync(CONDA_META_PATH)) return null;
 
-      const meta = JSON.parse(require('fs').readFileSync(metaPath, 'utf8'));
+      const meta = JSON.parse(require('fs').readFileSync(CONDA_META_PATH, 'utf8'));
       const pyPath = meta.python;
 
       if (!pyPath || !require('fs').existsSync(pyPath)) {

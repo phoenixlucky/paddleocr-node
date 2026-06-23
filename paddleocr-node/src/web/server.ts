@@ -10,6 +10,7 @@ import multer from 'multer';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
+import { execFile } from 'child_process';
 import type { Server } from 'http';
 import { PaddleOcr } from '../ocr';
 import type { PaddleOcrOptions } from '../types';
@@ -18,6 +19,7 @@ import type { PaddleOcrOptions } from '../types';
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3100;
 const HOST = process.env.HOST || '0.0.0.0';
+const DATA_ROOT = process.env.PADDLEOCR_DATA_ROOT || (process.platform === 'win32' ? 'D:\\paddleocr_data' : path.join(require('os').homedir(), 'paddleocr_data'));
 
 const UPLOAD_DIR = path.resolve(process.cwd(), 'uploads');
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
@@ -37,6 +39,7 @@ function decodeUploadFileName(fileName: string): string {
 if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 }
+fs.mkdirSync(DATA_ROOT, { recursive: true });
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
@@ -75,23 +78,97 @@ if (fs.existsSync(webDir)) {
 // ─── OCR 引擎（延迟初始化） ────────────────────────────
 
 let ocrEngine: PaddleOcr | null = null;
+let ocrEngineKey = '';
 let engineBusy = false;
 let httpServer: Server | null = null;
 
 async function getEngine(options?: PaddleOcrOptions): Promise<PaddleOcr> {
-  if (!ocrEngine) {
-    const opts: PaddleOcrOptions = {
-      lang: options?.lang || 'ch',
-      ocrVersion: options?.ocrVersion || 'PP-OCRv6',
-      device: options?.device || 'auto',
-      textDetThresh: options?.textDetThresh ?? 0.3,
-      textDetBoxThresh: options?.textDetBoxThresh ?? 0.5,
-      startupTimeoutMs: 60000,
-      requestTimeoutMs: 600000,
-    };
+  const opts: PaddleOcrOptions = {
+    lang: options?.lang || 'ch',
+    ocrVersion: options?.ocrVersion || 'PP-OCRv6',
+    device: options?.device || 'auto',
+    textDetThresh: options?.textDetThresh ?? 0.3,
+    textDetBoxThresh: options?.textDetBoxThresh ?? 0.5,
+    startupTimeoutMs: options?.ocrVersion === 'Unlimited-OCR' ? 120000 : 60000,
+    requestTimeoutMs: options?.ocrVersion === 'Unlimited-OCR' ? 1800000 : 600000,
+  };
+  const nextKey = `${opts.lang}:${opts.ocrVersion}:${opts.device}`;
+  if (!ocrEngine || ocrEngineKey !== nextKey) {
+    if (ocrEngine) await ocrEngine.close();
     ocrEngine = new PaddleOcr(opts);
+    ocrEngineKey = nextKey;
   }
   return ocrEngine;
+}
+
+const MODELS = [
+  { id: 'PP-OCRv6', name: 'PP-OCRv6', provider: 'PaddleOCR', default: true },
+  { id: 'PP-OCRv5', name: 'PP-OCRv5', provider: 'PaddleOCR' },
+  { id: 'PP-OCRv4', name: 'PP-OCRv4', provider: 'PaddleOCR' },
+  { id: 'Unlimited-OCR', name: 'Unlimited-OCR', provider: 'HuggingFace', repo: 'baidu/Unlimited-OCR', size: '6.78GB' },
+];
+
+const MODEL_PATHS = {
+  root: DATA_ROOT,
+  paddleOcrHome: DATA_ROOT,
+  huggingFaceHub: path.join(DATA_ROOT, 'huggingface', 'hub'),
+};
+fs.mkdirSync(MODEL_PATHS.huggingFaceHub, { recursive: true });
+
+function dataRootPythonPath(): string {
+  return process.platform === 'win32'
+    ? path.join(DATA_ROOT, 'conda-env', 'python.exe')
+    : path.join(DATA_ROOT, 'conda-env', 'bin', 'python');
+}
+
+function modelPath(id: string): string {
+  if (id === 'Unlimited-OCR') {
+    return path.join(MODEL_PATHS.huggingFaceHub, 'models--baidu--Unlimited-OCR');
+  }
+  return MODEL_PATHS.paddleOcrHome;
+}
+
+function isUnlimitedCached(): boolean {
+  const dir = path.join(modelPath('Unlimited-OCR'), 'snapshots');
+  if (!fs.existsSync(dir)) return false;
+  return fs.readdirSync(dir).some((name) =>
+    fs.existsSync(path.join(dir, name, 'model-00001-of-000001.safetensors')));
+}
+
+function modelStatus(id: string) {
+  if (id === 'Unlimited-OCR') return isUnlimitedCached() ? 'downloaded' : 'not_downloaded';
+  return 'on_demand';
+}
+
+function findPython(): string {
+  const dataRootPython = dataRootPythonPath();
+  if (fs.existsSync(dataRootPython)) return dataRootPython;
+
+  const metaPath = path.join(DATA_ROOT, 'python-path.json');
+  if (fs.existsSync(metaPath)) {
+    const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+    if (meta.python && fs.existsSync(meta.python)) return meta.python;
+  }
+  return process.platform === 'win32' ? 'python' : 'python3';
+}
+
+function runPython(args: string[], timeoutMs: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(findPython(), args, {
+      timeout: timeoutMs,
+      maxBuffer: 1024 * 1024,
+      env: {
+        ...process.env,
+        PADDLEOCR_DATA_ROOT: DATA_ROOT,
+        PADDLEOCR_HOME: MODEL_PATHS.paddleOcrHome,
+        HF_HOME: path.join(DATA_ROOT, 'huggingface'),
+        HUGGINGFACE_HUB_CACHE: MODEL_PATHS.huggingFaceHub,
+      },
+    }, (err, stdout, stderr) => {
+      if (err) reject(new Error((stderr || err.message).trim()));
+      else resolve((stdout || '').trim());
+    });
+  });
 }
 
 function formatFileSize(bytes: number): string {
@@ -175,6 +252,58 @@ app.post('/api/ocr', upload.single('file'), async (req, res) => {
   }
 });
 
+/** 可选模型列表 */
+app.get('/api/models', (_req, res) => {
+  res.json({
+    paths: {
+      ...MODEL_PATHS,
+      python: dataRootPythonPath(),
+      activePython: findPython(),
+    },
+    models: MODELS.map((model) => ({
+      ...model,
+      status: modelStatus(model.id),
+      path: modelPath(model.id),
+    })),
+  });
+});
+
+/** 按需下载/缓存单个模型 */
+app.post('/api/models/:id/download', async (req, res) => {
+  const model = MODELS.find((m) => m.id === req.params.id);
+  if (!model) {
+    res.status(404).json({ error: '未知模型' });
+    return;
+  }
+  if (engineBusy) {
+    res.status(429).json({ error: '引擎忙，请稍后再下载模型' });
+    return;
+  }
+
+  engineBusy = true;
+  try {
+    if (model.id === 'Unlimited-OCR') {
+      await runPython([
+        '-c',
+        'from huggingface_hub import snapshot_download; snapshot_download("baidu/Unlimited-OCR")',
+      ], 60 * 60 * 1000);
+    } else {
+      await runPython([
+        '-c',
+        `from paddleocr import PaddleOCR; PaddleOCR(lang="ch", ocr_version="${model.id}")`,
+      ], 20 * 60 * 1000);
+    }
+    res.json({ success: true, model: model.id, status: modelStatus(model.id) });
+  } catch (err: any) {
+    const hint = model.id === 'Unlimited-OCR'
+      ? '请先安装可选依赖: pip install torch torchvision transformers einops addict easydict psutil huggingface_hub'
+      : '请检查 PaddleOCR/PaddlePaddle 是否已安装。';
+    res.status(500).json({ error: `${err.message}\n${hint}` });
+  } finally {
+    engineBusy = false;
+  }
+});
+
 /** 服务器和引擎状态 */
 app.get('/api/status', async (_req, res) => {
   res.json({
@@ -190,6 +319,7 @@ app.post('/api/shutdown', async (_req, res) => {
   if (ocrEngine) {
     await ocrEngine.close();
     ocrEngine = null;
+    ocrEngineKey = '';
   }
   res.json({ success: true, message: '引擎已关闭' });
 });
@@ -232,20 +362,8 @@ app.use((err: any, _req: any, res: any, _next: any) => {
 // ─── 启动 ─────────────────────────────────────────────
 
 async function start() {
-  // 预初始化 OCR 引擎（加载模型）
   console.log('\n[启动] PaddleOCR Web 服务');
-  console.log('[启动] 正在初始化 OCR 引擎（首次会下载模型，可能需要数分钟）...');
-  console.time('[启动] 引擎初始化');
-
-  try {
-    const engine = await getEngine();
-    console.timeEnd('[启动] 引擎初始化');
-    console.log(`[启动] ✅ OCR 引擎就绪 (PID: ${process.pid})`);
-  } catch (err: any) {
-    console.error(`[启动] ❌ 引擎初始化失败: ${err.message}`);
-    console.error('[启动] 请检查 Python + PaddleOCR 是否正确安装');
-    console.error('[启动] 服务仍会启动，但 OCR 调用会返回错误');
-  }
+  console.log('[启动] 模型按需加载，不会在启动时下载全部模型');
 
   httpServer = app.listen(PORT, HOST, () => {
     const url = HOST === '0.0.0.0' ? `http://localhost:${PORT}` : `http://${HOST}:${PORT}`;

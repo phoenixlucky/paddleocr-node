@@ -23,8 +23,19 @@ import base64
 import tempfile
 import uuid
 import mimetypes
+import shutil
 from collections.abc import Mapping
 from pathlib import Path
+
+DATA_ROOT = os.environ.get(
+    "PADDLEOCR_DATA_ROOT",
+    r"D:\paddleocr_data" if os.name == "nt" else str(Path.home() / "paddleocr_data"),
+)
+os.makedirs(DATA_ROOT, exist_ok=True)
+os.environ.setdefault("PADDLEOCR_HOME", DATA_ROOT)
+os.environ.setdefault("HF_HOME", str(Path(DATA_ROOT) / "huggingface"))
+os.environ.setdefault("HUGGINGFACE_HUB_CACHE", str(Path(DATA_ROOT) / "huggingface" / "hub"))
+os.makedirs(os.environ["HUGGINGFACE_HUB_CACHE"], exist_ok=True)
 
 # ---------------------------------------------------------------------------
 # PDF 支持：优先用 pdfplumber 解析机器生成 PDF；扫描 PDF 回退为图片 OCR
@@ -579,10 +590,15 @@ class OcrEngine:
     def __init__(self, options: dict):
         self._options = options
         self._ocr: PaddleOCR | None = None
+        self._unlimited_model = None
+        self._unlimited_tokenizer = None
         self._current_options: dict = {}
         self._init_engine()
 
     def _init_engine(self):
+        if self._is_unlimited_ocr():
+            return
+
         if not HAS_PADDLE:
             raise RuntimeError(
                 "PaddleOCR 未安装。请执行: pip install paddleocr"
@@ -656,6 +672,40 @@ class OcrEngine:
                 )
             raise
 
+    def _is_unlimited_ocr(self) -> bool:
+        return str(self._options.get("ocrVersion", "")).lower() in {
+            "unlimited-ocr",
+            "baidu/unlimited-ocr",
+        }
+
+    def _ensure_unlimited_ocr(self):
+        if self._unlimited_model is not None and self._unlimited_tokenizer is not None:
+            return
+        try:
+            import torch
+            from transformers import AutoModel, AutoTokenizer
+        except ImportError as exc:
+            raise RuntimeError(
+                "Unlimited-OCR 依赖未安装。请先安装: "
+                "pip install torch torchvision transformers einops addict easydict psutil huggingface_hub"
+            ) from exc
+        if not torch.cuda.is_available():
+            raise RuntimeError("Unlimited-OCR 当前上游实现需要 NVIDIA CUDA GPU。")
+
+        model_name = "baidu/Unlimited-OCR"
+        self._unlimited_tokenizer = AutoTokenizer.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+            cache_dir=os.environ["HUGGINGFACE_HUB_CACHE"],
+        )
+        self._unlimited_model = AutoModel.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+            use_safetensors=True,
+            torch_dtype=torch.bfloat16,
+            cache_dir=os.environ["HUGGINGFACE_HUB_CACHE"],
+        ).eval().cuda()
+
     def recognize(self, input_path: str, options: dict | None = None) -> dict:
         """
         识别图片或 PDF 文件。
@@ -669,6 +719,9 @@ class OcrEngine:
         suffix = path.suffix.lower()
         is_pdf = suffix == ".pdf"
         self._current_options = options or {}
+
+        if self._is_unlimited_ocr():
+            return self._recognize_unlimited(str(path), is_pdf)
 
         if not is_pdf:
             # 图片 → 直接 OCR
@@ -698,6 +751,72 @@ class OcrEngine:
             "pages": pages,
             "fullText": page_text,
         }
+
+    def _recognize_unlimited(self, file_path: str, is_pdf: bool) -> dict:
+        """Unlimited-OCR 只返回文档解析文本；保留统一结果结构。"""
+        self._ensure_unlimited_ocr()
+        out_dir = tempfile.mkdtemp(prefix="unlimited_ocr_")
+        temp_images: list[str] = []
+        try:
+            if is_pdf:
+                temp_images = pdf_to_images(file_path, self._options.get("pdfDpi", 200))
+                if not temp_images:
+                    raise RuntimeError("PDF 渲染失败，无法交给 Unlimited-OCR。")
+                output = self._unlimited_model.infer_multi(
+                    self._unlimited_tokenizer,
+                    prompt="<image>Multi page parsing.",
+                    image_files=temp_images,
+                    output_path=out_dir,
+                    image_size=1024,
+                    max_length=32768,
+                    no_repeat_ngram_size=35,
+                    ngram_window=1024,
+                    save_results=False,
+                )
+                text = output[0] if isinstance(output, tuple) else str(output or "")
+                chunks = [p.strip() for p in text.split("<PAGE>") if p.strip()]
+                if not chunks:
+                    chunks = [text.strip()]
+                pages = [{
+                    "page": i + 1,
+                    "boxes": [],
+                    "tables": [],
+                    "previewImage": file_to_data_url(temp_images[i], "image/png") if i < len(temp_images) else "",
+                    "fullText": page_text,
+                } for i, page_text in enumerate(chunks)]
+            else:
+                text = self._unlimited_model.infer(
+                    self._unlimited_tokenizer,
+                    prompt="<image>document parsing.",
+                    image_file=file_path,
+                    output_path=out_dir,
+                    base_size=1024,
+                    image_size=640,
+                    crop_mode=True,
+                    max_length=32768,
+                    no_repeat_ngram_size=35,
+                    ngram_window=128,
+                    eval_mode=True,
+                    save_results=False,
+                )
+                text = str(text or "").strip()
+                pages = [{
+                    "page": 1,
+                    "boxes": [],
+                    "tables": [],
+                    "previewImage": "",
+                    "fullText": text,
+                }]
+            return {
+                "source": file_path,
+                "totalPages": len(pages),
+                "pages": pages,
+                "fullText": "\n".join(p.get("fullText", "") for p in pages),
+            }
+        finally:
+            if temp_images:
+                cleanup_temp_files(temp_images)
+            shutil.rmtree(out_dir, ignore_errors=True)
 
     def _recognize_pdf(self, pdf_path: str) -> dict:
         """

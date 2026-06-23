@@ -534,6 +534,7 @@
         <option value="PP-OCRv6">PP-OCRv6 (推荐)</option>
         <option value="PP-OCRv5">PP-OCRv5</option>
         <option value="PP-OCRv4">PP-OCRv4 (更快)</option>
+        <option value="Unlimited-OCR">Unlimited-OCR (可选)</option>
       </select>
     </label>
     <label class="toggle-label">📊 表格
@@ -560,6 +561,7 @@
     <button class="btn btn-primary" id="startBtn">🚀 开始识别</button>
     <button class="btn btn-secondary" id="copyBtn" disabled>📋 复制全文</button>
     <button class="btn btn-success" id="downloadBtn" disabled>📥 下载文本</button>
+    <button class="btn btn-secondary" id="modelBtn" type="button" aria-haspopup="dialog">模型管理</button>
     <button class="btn btn-secondary" id="changelogBtn" type="button" aria-haspopup="dialog">更新日志</button>
     <label class="engine-status" id="engineStatus">⏳ 引擎未初始化</label>
   </div>
@@ -656,6 +658,14 @@
   </div>
 </dialog>
 
+<dialog class="changelog-dialog" id="modelDialog" aria-labelledby="modelTitle">
+  <div class="changelog-header">
+    <h2 id="modelTitle">模型管理</h2>
+    <button class="changelog-close" id="modelCloseBtn" type="button">关闭</button>
+  </div>
+  <div class="changelog-content" id="modelList">正在读取模型状态...</div>
+</dialog>
+
 <script>
 // ================================================================
 //  JavaScript
@@ -688,6 +698,10 @@
   const tableOutput = $('#tableOutput');
   const copyBtn = $('#copyBtn');
   const downloadBtn = $('#downloadBtn');
+  const modelBtn = $('#modelBtn');
+  const modelDialog = $('#modelDialog');
+  const modelCloseBtn = $('#modelCloseBtn');
+  const modelList = $('#modelList');
   const changelogBtn = $('#changelogBtn');
   const changelogDialog = $('#changelogDialog');
   const changelogCloseBtn = $('#changelogCloseBtn');
@@ -711,6 +725,61 @@
   changelogCloseBtn.addEventListener('click', () => changelogDialog.close());
   changelogDialog.addEventListener('click', (event) => {
     if (event.target === changelogDialog) changelogDialog.close();
+  });
+  modelBtn.addEventListener('click', () => {
+    modelDialog.showModal();
+    loadModels();
+  });
+  modelCloseBtn.addEventListener('click', () => modelDialog.close());
+  modelDialog.addEventListener('click', (event) => {
+    if (event.target === modelDialog) modelDialog.close();
+  });
+
+  async function loadModels() {
+    try {
+      const resp = await fetch(apiUrl('/api/models'));
+      const data = await resp.json();
+      const paths = data.paths || {};
+      const pathHtml = `
+        <article class="changelog-entry">
+          <div class="changelog-meta">模型管理路径</div>
+          <p><strong>存储母路径:</strong> <code>${escapeHtml(paths.root || '')}</code></p>
+          <p><strong>PaddleOCR:</strong> <code>${escapeHtml(paths.paddleOcrHome || '')}</code></p>
+          <p><strong>HuggingFace:</strong> <code>${escapeHtml(paths.huggingFaceHub || '')}</code></p>
+          <p><strong>Python:</strong> <code>${escapeHtml(paths.python || '')}</code></p>
+        </article>
+      `;
+      const modelsHtml = data.models.map(model => `
+        <article class="changelog-entry">
+          <div class="changelog-meta">${escapeHtml(model.provider)} · ${model.status === 'downloaded' ? '已下载' : model.status === 'on_demand' ? '按需加载' : '未下载'}</div>
+          <h3>${escapeHtml(model.name)}${model.size ? ` <small>(${escapeHtml(model.size)})</small>` : ''}</h3>
+          <p><strong>路径:</strong> <code>${escapeHtml(model.path || '')}</code></p>
+          <button class="btn btn-secondary" data-model-download="${escapeHtml(model.id)}">下载/缓存此模型</button>
+        </article>
+      `).join('');
+      modelList.innerHTML = pathHtml + modelsHtml;
+    } catch (err) {
+      modelList.textContent = err.message || '读取模型状态失败';
+    }
+  }
+
+  modelList.addEventListener('click', async (event) => {
+    const btn = event.target.closest('[data-model-download]');
+    if (!btn) return;
+    const modelId = btn.dataset.modelDownload;
+    btn.disabled = true;
+    btn.textContent = '下载中...';
+    try {
+      const resp = await fetch(apiUrl(`/api/models/${encodeURIComponent(modelId)}/download`), { method: 'POST' });
+      const data = await resp.json();
+      if (!data.success) throw new Error(data.error || '下载失败');
+      await loadModels();
+    } catch (err) {
+      btn.textContent = '下载失败';
+      alert(err.message || '下载失败');
+    } finally {
+      btn.disabled = false;
+    }
   });
 
   // ─── 上传区域 ──────────────────────────────────────
@@ -782,7 +851,9 @@
 
     progressBar.classList.add('show');
     progressText.textContent = '正在识别中...';
-    progressSub.textContent = '首次运行会下载 OCR 模型（约 100-200MB），请耐心等待';
+    progressSub.textContent = $('#ocrVersion').value === 'Unlimited-OCR'
+      ? 'Unlimited-OCR 首次使用需先在模型管理中下载约 6.78GB 模型'
+      : '首次运行会下载所选 PaddleOCR 模型，请耐心等待';
     startBtn.disabled = true;
     results.classList.remove('show');
     setResultActionsEnabled(false);

@@ -3,24 +3,27 @@
  * 安装后脚本：自动检测 Python / Conda 环境，安装 PaddleOCR 及其依赖
  *
  * 优先级：
- *   1. 系统 PATH 中的 Python 3.8+
- *   2. Conda/Mamba 自动创建隔离环境 → ~/.paddleocr/conda-env/
+ *   1. Conda/Mamba 自动创建隔离环境 → D:\paddleocr_data\conda-env\
+ *   2. 系统 PATH 中的 Python 3.8+
  *   3. 兜底输出手动安装指引
  *
- * Conda 环境的信息会写入 ~/.paddleocr/python-path.json，
+ * Conda 环境的信息会写入 D:\paddleocr_data\python-path.json，
  * 运行时会被 src/ocr.ts 优先读取。
  */
 
 const { execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
-const os = require('os');
 
 // ─── 路径常量 ────────────────────────────────────────
-const PADDLEOCR_HOME = path.join(os.homedir(), '.paddleocr');
+const IS_WIN = process.platform === 'win32';
+const PADDLEOCR_HOME = process.env.PADDLEOCR_DATA_ROOT || (IS_WIN ? 'D:\\paddleocr_data' : path.join(require('os').homedir(), 'paddleocr_data'));
 const CONDA_ENV_DIR = path.join(PADDLEOCR_HOME, 'conda-env');
 const META_PATH = path.join(PADDLEOCR_HOME, 'python-path.json');
-const IS_WIN = process.platform === 'win32';
+process.env.PADDLEOCR_DATA_ROOT = PADDLEOCR_HOME;
+process.env.PADDLEOCR_HOME = PADDLEOCR_HOME;
+process.env.HF_HOME = path.join(PADDLEOCR_HOME, 'huggingface');
+process.env.HUGGINGFACE_HUB_CACHE = path.join(PADDLEOCR_HOME, 'huggingface', 'hub');
 
 // ─── 颜色 ────────────────────────────────────────────
 const colors = {
@@ -349,17 +352,8 @@ function main() {
     } catch { /* ignore stale meta */ }
   }
 
-  // 2. 找系统 Python
-  const sysPy = findSystemPython();
-  if (sysPy) {
-    success(`找到系统 Python: ${sysPy.cmd} (${sysPy.version})`);
-    installViaPip(sysPy);
-    log(`${colors.bold}paddleocr-node 初始化完成${colors.reset}`);
-    return;
-  }
-
-  // 3. 尝试 Conda
-  log('未找到系统 Python，正在查找 Conda...');
+  // 2. 优先使用 D:\paddleocr_data 下的 Conda 环境
+  log('正在查找 Conda...');
   const conda = findConda();
   if (conda) {
     success(`找到 ${conda.cmd} (${conda.version})`);
@@ -376,6 +370,15 @@ function main() {
     installDepsViaConda(pyPath, conda.cmd);
     writeCondaMeta(pyPath);
     success(`Conda 环境就绪: ${pyPath}`);
+    log(`${colors.bold}paddleocr-node 初始化完成${colors.reset}`);
+    return;
+  }
+
+  // 3. 找系统 Python
+  const sysPy = findSystemPython();
+  if (sysPy) {
+    success(`找到系统 Python: ${sysPy.cmd} (${sysPy.version})`);
+    installViaPip(sysPy);
     log(`${colors.bold}paddleocr-node 初始化完成${colors.reset}`);
     return;
   }

@@ -1,0 +1,10 @@
+# Optional: needed only when using baidu/Unlimited-OCR.
+# Model files are still downloaded on demand from the web UI.
+torch
+torchvision
+transformers
+huggingface_hub
+einops
+addict
+easydict
+psutil
