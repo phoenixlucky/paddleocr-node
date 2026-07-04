@@ -981,7 +981,7 @@
     const { data } = ctx.getImageData(0, 0, w, h);
     URL.revokeObjectURL(img.src);
 
-    let white = 0, edgeWhite = 0, edgePixels = 0, dark = 0, ink = 0, black = 0, colored = 0, transitions = 0;
+    let white = 0, edgeWhite = 0, edgePixels = 0, dark = 0, ink = 0, black = 0, markBlack = 0, colored = 0, transitions = 0;
     let outerInk = 0, outerBlack = 0, outerPixels = 0;
     for (let y = 0; y < h; y += 2) {
       let prevInk = false;
@@ -994,10 +994,29 @@
         const isDark = bright < 92;
         const isInk = bright < 150 && max - min < 55;
         const isBlack = bright < 70 && max - min < 45;
+        let nearWhite = false;
+        if (isBlack) {
+          for (const dy of [-10, 0, 10]) {
+            for (const dx of [-10, 0, 10]) {
+              if (dx === 0 && dy === 0) continue;
+              const xx = x + dx, yy = y + dy;
+              if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
+              const ni = (yy * w + xx) * 4;
+              const nr = data[ni], ng = data[ni + 1], nb = data[ni + 2];
+              const nMax = Math.max(nr, ng, nb), nMin = Math.min(nr, ng, nb);
+              if (nr > 238 && ng > 238 && nb > 238 && nMax - nMin < 18) {
+                nearWhite = true;
+                break;
+              }
+            }
+            if (nearWhite) break;
+          }
+        }
         if (isWhite) white++;
         if (isDark) dark++;
         if (isInk) ink++;
         if (isBlack) black++;
+        if (nearWhite) markBlack++;
         if (max - min > 45 && bright > 70 && bright < 230) colored++;
         if (x < w * .08 || x > w * .92 || y < h * .08 || y > h * .92) {
           edgePixels++;
@@ -1018,13 +1037,14 @@
     const darkRatio = dark / sampled;
     const inkRatio = ink / sampled;
     const blackRatio = black / sampled;
+    const markBlackShare = black ? markBlack / black : 0;
     const colorRatio = colored / sampled;
     const transitionRatio = transitions / sampled;
     const outerInkRatio = outerPixels ? outerInk / outerPixels : 0;
     const outerBlackRatio = outerPixels ? outerBlack / outerPixels : 0;
 
     // ponytail: heuristic only; add OCR/object detection if SKU-level accuracy is required.
-    if (edgeWhiteRatio > .65 && blackRatio > .0035 && outerBlackRatio > .0025) {
+    if (edgeWhiteRatio > .65 && blackRatio > .0035 && outerBlackRatio > .0025 && markBlackShare > .45) {
       return {
         success: true,
         category: '尺寸图',
@@ -1033,7 +1053,7 @@
         model: '本地像素规则',
       };
     }
-    if (edgeWhiteRatio > .82 && whiteRatio > .45 && darkRatio < .16 && outerBlackRatio < .0025) {
+    if (edgeWhiteRatio > .82 && whiteRatio > .25) {
       return {
         success: true,
         category: '白底图',
