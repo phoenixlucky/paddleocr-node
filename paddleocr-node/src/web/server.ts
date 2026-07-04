@@ -10,7 +10,7 @@ import multer from 'multer';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
-import { execFile } from 'child_process';
+import { execFile, execFileSync } from 'child_process';
 import type { Server } from 'http';
 import { PaddleOcr } from '../ocr';
 import type { PaddleOcrOptions } from '../types';
@@ -135,9 +135,31 @@ function isUnlimitedCached(): boolean {
     fs.existsSync(path.join(dir, name, 'model-00001-of-000001.safetensors')));
 }
 
+let paddleOcrInstalled: boolean | null = null;
+function isPaddleOcrInstalled(): boolean {
+  if (paddleOcrInstalled !== null) return paddleOcrInstalled;
+  try {
+    execFileSync(findPython(), ['-c', 'import paddleocr'], {
+      timeout: 15000,
+      stdio: 'ignore',
+      env: {
+        ...process.env,
+        PADDLEOCR_DATA_ROOT: DATA_ROOT,
+        PADDLEOCR_HOME: MODEL_PATHS.paddleOcrHome,
+        HF_HOME: path.join(DATA_ROOT, 'huggingface'),
+        HUGGINGFACE_HUB_CACHE: MODEL_PATHS.huggingFaceHub,
+      },
+    });
+    paddleOcrInstalled = true;
+  } catch {
+    paddleOcrInstalled = false;
+  }
+  return paddleOcrInstalled;
+}
+
 function modelStatus(id: string) {
   if (id === 'Unlimited-OCR') return isUnlimitedCached() ? 'downloaded' : 'not_downloaded';
-  return 'on_demand';
+  return isPaddleOcrInstalled() ? 'downloaded' : 'not_downloaded';
 }
 
 function findPython(): string {
@@ -175,6 +197,79 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function classifierSourcePath(): string {
+  return path.resolve(process.cwd(), 'bin', 'image-type-classifier.cs');
+}
+
+function classifierExePath(): string {
+  return path.resolve(process.cwd(), 'bin', 'image-type-classifier.exe');
+}
+
+function findCsc(): string {
+  const candidates = [
+    'C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe',
+    'C:\\Windows\\Microsoft.NET\\Framework\\v4.0.30319\\csc.exe',
+  ];
+  const found = candidates.find((candidate) => fs.existsSync(candidate));
+  if (!found) throw new Error('未找到 csc.exe，无法编译快速识图本地分类器。');
+  return found;
+}
+
+function ensureClassifierExe() {
+  const source = classifierSourcePath();
+  const exe = classifierExePath();
+  if (!fs.existsSync(source)) throw new Error(`分类器源码不存在: ${source}`);
+  const needsBuild = !fs.existsSync(exe) ||
+    fs.statSync(source).mtimeMs > fs.statSync(exe).mtimeMs;
+  if (!needsBuild) return;
+  execFileSync(findCsc(), [
+    '/nologo',
+    '/target:exe',
+    `/out:${exe}`,
+    '/r:System.Drawing.dll',
+    source,
+  ], { timeout: 60000 });
+}
+
+function classifyImageFile(filePath: string): Promise<any> {
+  if (process.platform !== 'win32') {
+    return Promise.reject(new Error('快速识图 API 当前使用 Windows 本地图像库，仅支持 Windows 服务端。'));
+  }
+  ensureClassifierExe();
+  return new Promise((resolve, reject) => {
+    execFile(classifierExePath(), [filePath], {
+      timeout: 120000,
+      maxBuffer: 1024 * 1024,
+    }, (err, stdout, stderr) => {
+      if (err) {
+        reject(new Error((stderr || err.message).trim()));
+        return;
+      }
+      try {
+        const raw = JSON.parse(stdout.trim());
+        const labels: Record<string, string> = {
+          dimension: '尺寸图',
+          white_background: '白底图',
+          other: '其他图片',
+        };
+        const reasons: Record<string, string> = {
+          dimension_marks: '检测到外圈深色标注线、文字或尺寸边界，优先按尺寸图处理。',
+          white_background: '图片边缘和背景大面积接近纯白，未检测到明显尺寸标注密度。',
+          other: '背景白度或标注密度未达到尺寸图、白底图规则阈值。',
+        };
+        resolve({
+          category: labels[raw.category] || '其他图片',
+          confidence: raw.confidence,
+          reason: reasons[raw.reason] || reasons.other,
+          model: 'Windows 本地像素规则',
+        });
+      } catch {
+        reject(new Error(`快速识图结果解析失败: ${stdout.slice(0, 200)}`));
+      }
+    });
+  });
 }
 
 // ─── API 路由 ─────────────────────────────────────────
@@ -248,6 +343,69 @@ app.post('/api/ocr', upload.single('file'), async (req, res) => {
   } finally {
     engineBusy = false;
     // 清理上传文件（保留最近几个）
+    cleanupOldFiles();
+  }
+});
+
+/** 快速识图：判断尺寸图 / 白底图 / 其他图片 */
+app.get('/api/image-type', (_req, res) => {
+  res.json({
+    endpoint: 'POST /api/image-type',
+    localPathEndpoint: 'POST /api/image-type-path',
+    contentType: 'multipart/form-data',
+    field: 'file',
+    categories: ['尺寸图', '白底图', '其他图片'],
+  });
+});
+
+/** 快速识图：本机路径直读，适合 notebook 在同一台机器调用 */
+app.post('/api/image-type-path', async (req, res) => {
+  try {
+    const filePath = String(req.body?.path || '');
+    if (!filePath || !fs.existsSync(filePath)) {
+      res.status(400).json({ error: '图片路径不存在' });
+      return;
+    }
+    if (!/\.(jpg|jpeg|png|bmp|gif|webp)$/i.test(filePath)) {
+      res.status(400).json({ error: '快速识图模式只支持图片' });
+      return;
+    }
+    const result = await classifyImageFile(filePath);
+    const stat = fs.statSync(filePath);
+    res.json({
+      success: true,
+      fileName: path.basename(filePath),
+      fileSize: formatFileSize(stat.size),
+      category: result.category,
+      confidence: result.confidence,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || '快速识图失败' });
+  }
+});
+
+app.post('/api/image-type', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      res.status(400).json({ error: '请上传图片' });
+      return;
+    }
+    if (!req.file.mimetype.startsWith('image/') &&
+        !/\.(jpg|jpeg|png|bmp|gif|webp)$/i.test(req.file.originalname)) {
+      res.status(400).json({ error: '快速识图模式只支持图片' });
+      return;
+    }
+    const result = await classifyImageFile(req.file.path);
+    res.json({
+      success: true,
+      fileName: decodeUploadFileName(req.file.originalname),
+      fileSize: formatFileSize(req.file.size),
+      category: result.category,
+      confidence: result.confidence,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || '快速识图失败' });
+  } finally {
     cleanupOldFiles();
   }
 });

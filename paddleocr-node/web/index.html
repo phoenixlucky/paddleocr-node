@@ -516,6 +516,12 @@
 
   <!-- ===== 顶部工具栏 ===== -->
   <div class="top-toolbar">
+    <label>🔎 模式
+      <select id="recognizeMode">
+        <option value="ocr">文字识别</option>
+        <option value="imageType">快速识图</option>
+      </select>
+    </label>
     <label>🌐 语言
       <select id="lang">
         <option value="ch">中文简体</option>
@@ -707,6 +713,8 @@
   const changelogCloseBtn = $('#changelogCloseBtn');
   const engineStatus = $('#engineStatus');
   const sourcePreview = $('#sourcePreview');
+  const recognizeMode = $('#recognizeMode');
+  const layoutContainer = $('#layoutContainer');
 
   setResultActionsEnabled(false);
 
@@ -719,6 +727,7 @@
 
   const API_BASE = window.location.protocol === 'file:' ? 'http://localhost:3100' : '';
   const apiUrl = (path) => `${API_BASE}${path}`;
+  const isFastImageMode = () => recognizeMode.value === 'imageType';
 
   // ─── 更新日志 ──────────────────────────────────────
   changelogBtn.addEventListener('click', () => changelogDialog.showModal());
@@ -754,7 +763,9 @@
           <div class="changelog-meta">${escapeHtml(model.provider)} · ${model.status === 'downloaded' ? '已下载' : model.status === 'on_demand' ? '按需加载' : '未下载'}</div>
           <h3>${escapeHtml(model.name)}${model.size ? ` <small>(${escapeHtml(model.size)})</small>` : ''}</h3>
           <p><strong>路径:</strong> <code>${escapeHtml(model.path || '')}</code></p>
-          <button class="btn btn-secondary" data-model-download="${escapeHtml(model.id)}">下载/缓存此模型</button>
+          <button class="btn btn-secondary" data-model-download="${escapeHtml(model.id)}" ${model.status === 'downloaded' ? 'disabled' : ''}>
+            ${model.status === 'downloaded' ? '已下载' : '下载/缓存此模型'}
+          </button>
         </article>
       `).join('');
       modelList.innerHTML = pathHtml + modelsHtml;
@@ -850,8 +861,9 @@
     if (!currentFile) { alert('请先选择文件'); return; }
 
     progressBar.classList.add('show');
-    progressText.textContent = '正在识别中...';
-    progressSub.textContent = $('#ocrVersion').value === 'Unlimited-OCR'
+    progressText.textContent = isFastImageMode() ? '正在快速识图...' : '正在识别中...';
+    progressSub.textContent = isFastImageMode() ? '本地分析图片像素，判断尺寸图 / 白底图 / 其他图片'
+      : $('#ocrVersion').value === 'Unlimited-OCR'
       ? 'Unlimited-OCR 首次使用需先在模型管理中下载约 6.78GB 模型'
       : '首次运行会下载所选 PaddleOCR 模型，请耐心等待';
     startBtn.disabled = true;
@@ -867,6 +879,12 @@
     const startTime = Date.now();
 
     try {
+      if (isFastImageMode()) {
+        const data = await classifyImageLocally(currentFile);
+        renderImageTypeResult(data, ((Date.now() - startTime) / 1000).toFixed(1));
+        return;
+      }
+
       const resp = await fetch(apiUrl(`/api/ocr?lang=${encodeURIComponent(lang)}&ocrVersion=${encodeURIComponent(ocrVersion)}&enableTable=${enableTable}`), {
         method: 'POST',
         body: formData,
@@ -909,6 +927,138 @@
       startBtn.disabled = false;
     }
   });
+
+  function renderImageTypeResult(data, elapsed) {
+    const text = [
+      `分类：${data.category || '未知'}`,
+      `置信度：${data.confidence ? Math.round(data.confidence * 100) + '%' : '-'}`,
+      `理由：${data.reason || '-'}`,
+      `算法：${data.model || '本地像素规则'}`,
+    ].join('\n');
+    resultData = {
+      success: true,
+      totalPages: 1,
+      totalTables: 0,
+      fullText: text,
+      pages: [{ page: 1, boxes: [], tables: [], fullText: text }],
+    };
+    rPages.textContent = '1';
+    rTables.textContent = '0';
+    rChars.textContent = text.length;
+    rTime.textContent = `${elapsed}s`;
+    pageSelector.innerHTML = '';
+    textOutput.innerHTML = `<div class="plain-text-output">
+      <p class="plain-text-line"><strong>分类：</strong>${escapeHtml(data.category || '未知')}</p>
+      <p class="plain-text-line"><strong>置信度：</strong>${escapeHtml(data.confidence ? Math.round(data.confidence * 100) + '%' : '-')}</p>
+      <p class="plain-text-line"><strong>理由：</strong>${escapeHtml(data.reason || '-')}</p>
+      <p class="plain-text-line"><strong>算法：</strong>${escapeHtml(data.model || '本地像素规则')}</p>
+    </div>`;
+    tableOutput.innerHTML = '<p class="table-empty">快速识图不输出表格</p>';
+    renderSourcePreview(resultData.pages[0]);
+    layoutContainer.innerHTML = '<p style="color:#999;padding:.5rem;">快速识图不生成 OCR 高亮框</p>';
+    results.classList.add('show');
+    setResultActionsEnabled(true);
+    progressText.textContent = '✅ 快速识图完成';
+    progressSub.textContent = `完成！耗时 ${elapsed}s`;
+    progressBar.classList.remove('show');
+  }
+
+  async function classifyImageLocally(file) {
+    if (!file.type.startsWith('image/') && !/\.(jpg|jpeg|png|bmp|gif|webp)$/i.test(file.name)) {
+      throw new Error('快速识图模式只支持图片');
+    }
+    const img = await loadImageForAnalysis(file);
+    const maxSide = 720;
+    const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.max(1, Math.round(img.naturalWidth * scale));
+    const h = Math.max(1, Math.round(img.naturalHeight * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) throw new Error('当前浏览器不支持本地图片分析');
+    ctx.drawImage(img, 0, 0, w, h);
+    const { data } = ctx.getImageData(0, 0, w, h);
+    URL.revokeObjectURL(img.src);
+
+    let white = 0, edgeWhite = 0, edgePixels = 0, dark = 0, ink = 0, black = 0, colored = 0, transitions = 0;
+    let outerInk = 0, outerBlack = 0, outerPixels = 0;
+    for (let y = 0; y < h; y += 2) {
+      let prevInk = false;
+      for (let x = 0; x < w; x += 2) {
+        const i = (y * w + x) * 4;
+        const r = data[i], g = data[i + 1], b = data[i + 2];
+        const max = Math.max(r, g, b), min = Math.min(r, g, b);
+        const bright = (r + g + b) / 3;
+        const isWhite = r > 238 && g > 238 && b > 238 && max - min < 18;
+        const isDark = bright < 92;
+        const isInk = bright < 150 && max - min < 55;
+        const isBlack = bright < 70 && max - min < 45;
+        if (isWhite) white++;
+        if (isDark) dark++;
+        if (isInk) ink++;
+        if (isBlack) black++;
+        if (max - min > 45 && bright > 70 && bright < 230) colored++;
+        if (x < w * .08 || x > w * .92 || y < h * .08 || y > h * .92) {
+          edgePixels++;
+          if (isWhite) edgeWhite++;
+        }
+        if (x < w * .25 || x > w * .75 || y < h * .25 || y > h * .75) {
+          outerPixels++;
+          if (isInk) outerInk++;
+          if (isBlack) outerBlack++;
+        }
+        if (x > 0 && isInk !== prevInk) transitions++;
+        prevInk = isInk;
+      }
+    }
+    const sampled = Math.ceil(w / 2) * Math.ceil(h / 2);
+    const whiteRatio = white / sampled;
+    const edgeWhiteRatio = edgePixels ? edgeWhite / edgePixels : 0;
+    const darkRatio = dark / sampled;
+    const inkRatio = ink / sampled;
+    const blackRatio = black / sampled;
+    const colorRatio = colored / sampled;
+    const transitionRatio = transitions / sampled;
+    const outerInkRatio = outerPixels ? outerInk / outerPixels : 0;
+    const outerBlackRatio = outerPixels ? outerBlack / outerPixels : 0;
+
+    // ponytail: heuristic only; add OCR/object detection if SKU-level accuracy is required.
+    if (edgeWhiteRatio > .65 && blackRatio > .0035 && outerBlackRatio > .0025) {
+      return {
+        success: true,
+        category: '尺寸图',
+        confidence: Math.min(.95, .58 + blackRatio * 20 + outerBlackRatio * 30 + transitionRatio),
+        reason: '检测到外圈深色标注线、文字或尺寸边界，优先按尺寸图处理。',
+        model: '本地像素规则',
+      };
+    }
+    if (edgeWhiteRatio > .82 && whiteRatio > .45 && darkRatio < .16 && outerBlackRatio < .0025) {
+      return {
+        success: true,
+        category: '白底图',
+        confidence: Math.min(.95, .58 + edgeWhiteRatio * .32 + whiteRatio * .12),
+        reason: '图片边缘和背景大面积接近纯白，未检测到明显尺寸标注密度。',
+        model: '本地像素规则',
+      };
+    }
+    return {
+      success: true,
+      category: '其他图片',
+      confidence: Math.min(.9, .55 + Math.abs(colorRatio - darkRatio)),
+      reason: '背景白度或标注密度未达到尺寸图、白底图规则阈值。',
+      model: '本地像素规则',
+    };
+  }
+
+  function loadImageForAnalysis(file) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('图片加载失败，无法快速识图'));
+      img.src = URL.createObjectURL(file);
+    });
+  }
 
   // ─── 渲染页面 ──────────────────────────────────────
   // ─── 缩放 ──────────────────────────────────────────────

@@ -104,7 +104,7 @@ function createCondaEnv(condaCmd) {
   // 1. 创建环境
   try {
     execSync(
-      `${condaCmd} create -p "${CONDA_ENV_DIR}" python=3.10 -y -q`,
+      `${condaCmd} create -p "${CONDA_ENV_DIR}" -c conda-forge --override-channels python=3.10 -y -q`,
       { stdio: 'inherit', timeout: 600000 }
     );
   } catch (e) {
@@ -170,7 +170,7 @@ function installDepsViaConda(pyPath, condaCmd) {
             warn(`尝试通过 ${condaCmd} 安装 paddlepaddle...`);
             try {
               execSync(
-                `${condaCmd} install -c conda-forge paddlepaddle -y`,
+                `${condaCmd} install -p "${CONDA_ENV_DIR}" -c conda-forge --override-channels paddlepaddle -y`,
                 { stdio: 'inherit', timeout: 600000 }
               );
               // 再次验证
@@ -180,7 +180,7 @@ function installDepsViaConda(pyPath, condaCmd) {
               success('paddlepaddle 通过 conda 安装成功 ✓');
             } catch (e2) {
               warn(`conda 安装 paddlepaddle 也失败: ${e2.message}`);
-              warn(`请手动执行: ${condaCmd} install -c conda-forge paddlepaddle`);
+              warn(`请手动执行: ${condaCmd} install -p "${CONDA_ENV_DIR}" -c conda-forge --override-channels paddlepaddle`);
             }
           } else {
             warn(`如果使用中有问题，请手动执行: "${pyPath}" -m pip install ${pipName}`);
@@ -216,7 +216,7 @@ function verifyExistingCondaDeps(pyPath, condaCmd) {
         if (pkg === 'paddle' && condaCmd) {
           warn(`pip 安装 paddlepaddle 失败，尝试通过 ${condaCmd} 安装...`);
           try {
-            execSync(`${condaCmd} install -p "${CONDA_ENV_DIR}" -c conda-forge paddlepaddle -y`, {
+            execSync(`${condaCmd} install -p "${CONDA_ENV_DIR}" -c conda-forge --override-channels paddlepaddle -y`, {
               stdio: 'inherit', timeout: 600000,
             });
             success('paddlepaddle 通过 conda 安装成功');
